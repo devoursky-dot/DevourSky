@@ -16,13 +16,12 @@ const FloatingToolbar = React.memo(({
   isFullScreen, toggleFullScreen,
   hasMask, handleCropTool,
   onFileChange, onOpenPageSelector,
-  currPage, numPages, onPrevPage, onNextPage, onClearAll,
-  onUndo, onRedo, canUndo, canRedo
+  currPage, numPages, onPrevPage, onNextPage, onClearAll, 
+  onUndo, onRedo, canUndo, canRedo,
+  showPenSettings, setShowPenSettings, showZoomSlider, setShowZoomSlider
 }) => {
   // 툴바 내부의 UI 상태 (팝업 열림/닫힘 등)는 툴바 스스로 관리합니다.
-  const [showPenSettings, setShowPenSettings] = useState(false);
   const [penSettingsPos, setPenSettingsPos] = useState({ top: 0, left: 0 });
-  const [showZoomSlider, setShowZoomSlider] = useState(false);
   const [sliderPos, setSliderPos] = useState({ top: 0, left: 0 });
   const [showClearConfirm, setShowClearConfirm] = useState(false); // 삭제 확인 팝업 상태
 
@@ -212,6 +211,23 @@ const SmartBoardApp = () => {
   // 1. 훅에서 모든 로직과 상태를 가져옵니다.
   const board = useSmartBoard();
 
+  // 2. 툴바 팝업 상태를 상위 컴포넌트로 이동 (드로잉 시 닫기 위해)
+  const [showPenSettings, setShowPenSettings] = useState(false);
+  const [showZoomSlider, setShowZoomSlider] = useState(false);
+
+  // 드로잉 시작 시 팝업 닫기 래퍼 함수
+  const handleStageMouseDown = (e) => {
+    setShowPenSettings(false);
+    setShowZoomSlider(false);
+    board.handleMouseDown(e);
+  };
+
+  const handleStageTouchStart = (e) => {
+    setShowPenSettings(false);
+    setShowZoomSlider(false);
+    board.handleTouchStart(e);
+  };
+
   // 2. 메인 캔버스 렌더링 최적화
   const boardContent = useMemo(() => (
     <>
@@ -228,8 +244,8 @@ const SmartBoardApp = () => {
           width={window.innerWidth} height={window.innerHeight}
           scaleX={board.stageScale} scaleY={board.stageScale}
           x={board.stagePos.x} y={board.stagePos.y}
-          onMouseDown={board.handleMouseDown} onMouseMove={board.handleMouseMove} onMouseUp={board.handleMouseUp}
-          onTouchStart={board.handleTouchStart} onTouchMove={board.handleTouchMove} onTouchEnd={board.handleTouchEnd}
+          onMouseDown={handleStageMouseDown} onMouseMove={board.handleMouseMove} onMouseUp={board.handleMouseUp}
+          onTouchStart={handleStageTouchStart} onTouchMove={board.handleTouchMove} onTouchEnd={board.handleTouchEnd}
           onWheel={board.handleWheel}
           draggable={board.tool === 'hand'}
           onDragEnd={(e) => board.setStagePos({ x: e.target.x(), y: e.target.y() })}
@@ -299,7 +315,9 @@ const SmartBoardApp = () => {
   ), [
     board.pdfFile, board.pdfImage, board.lines, board.tool, board.stageScale, board.stagePos, board.bgColor, 
     board.currentCrop, board.onRenderSuccess, board.handleMouseDown, board.handleMouseMove, board.handleMouseUp, 
-    board.handleTouchStart, board.handleTouchMove, board.handleTouchEnd, board.handleWheel, board.currPage, board.onDocumentLoadSuccess
+    board.handleTouchStart, board.handleTouchMove, board.handleTouchEnd, board.handleWheel, board.currPage, board.onDocumentLoadSuccess,
+    // 의존성 추가 (팝업 상태 변경 시 리렌더링은 필요 없지만 함수 재생성을 위해)
+    // handleStageMouseDown, handleStageTouchStart는 내부에서 state setter만 호출하므로 안정적임
   ]);
 
   return (
@@ -316,6 +334,8 @@ const SmartBoardApp = () => {
         currPage={board.currPage} numPages={board.numPages} onPrevPage={board.handlePrevPage} onNextPage={board.handleNextPage}
         onClearAll={board.handleClearAll}
         onUndo={board.undo} onRedo={board.redo} canUndo={board.canUndo} canRedo={board.canRedo}
+        showPenSettings={showPenSettings} setShowPenSettings={setShowPenSettings}
+        showZoomSlider={showZoomSlider} setShowZoomSlider={setShowZoomSlider}
       />
 
       {/* 페이지 선택 모달 */}

@@ -481,9 +481,11 @@ export const useSmartBoard = () => {
 
   // 전체 삭제 핸들러
   const handleClearAll = useCallback(() => {
-    setLines([]);
+    // 마스킹(rect)은 유지하고 나머지 판서만 삭제
+    const maskLines = linesRef.current.filter(line => line.tool === 'rect');
+    setLines(maskLines);
     if (smartTimer.current) clearTimeout(smartTimer.current);
-    addToHistory([]); // 빈 상태를 기록에 추가
+    addToHistory(maskLines); // 마스크만 남은 상태를 기록에 추가
   }, [addToHistory]);
 
   // UI 컴포넌트로 전달할 모든 데이터와 함수를 반환
