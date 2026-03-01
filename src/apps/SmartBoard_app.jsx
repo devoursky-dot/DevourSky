@@ -18,7 +18,8 @@ const FloatingToolbar = React.memo(({
   onFileChange, onOpenPageSelector,
   currPage, numPages, onPrevPage, onNextPage, onClearAll, 
   onUndo, onRedo, canUndo, canRedo,
-  showPenSettings, setShowPenSettings, showZoomSlider, setShowZoomSlider
+  showPenSettings, setShowPenSettings, showZoomSlider, setShowZoomSlider,
+  isMobile
 }) => {
   // 툴바 내부의 UI 상태 (팝업 열림/닫힘 등)는 툴바 스스로 관리합니다.
   const [penSettingsPos, setPenSettingsPos] = useState({ top: 0, left: 0 });
@@ -69,26 +70,32 @@ const FloatingToolbar = React.memo(({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showZoomSlider, showPenSettings, activePenId, showClearConfirm]);
 
+  // 반응형 스타일 적용
+  const currentBtnStyle = isMobile ? { ...btnStyle, padding: '6px' } : btnStyle;
+  const currentActiveBtn = isMobile ? { ...activeBtn, padding: '6px' } : activeBtn;
+  const currentDisabledBtn = isMobile ? { ...disabledBtnStyle, padding: '6px' } : disabledBtnStyle;
+  const iconSize = isMobile ? 18 : 20;
+
   return (
     <div 
       ref={toolbarRef}
       style={{
-        position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)',
+        position: 'fixed', bottom: isMobile ? '10px' : '20px', left: '50%', transform: 'translateX(-50%)',
         display: 'flex', flexDirection: 'row', flexWrap: 'wrap', maxWidth: '94vw', maxHeight: '90vh',
-        justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '10px',
+        justifyContent: 'center', alignItems: 'center', gap: isMobile ? '4px' : '8px', padding: isMobile ? '6px' : '10px',
         background: 'rgba(255, 255, 255, 0.95)', backdropFilter: 'blur(10px)',
         borderRadius: '16px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)', zIndex: 1000,
         transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
-        <button onClick={() => fileInputRef.current.click()} style={btnStyle} title="PDF 불러오기"><FileUp size={20}/></button>
+      <div style={{ display: 'flex', flexDirection: 'row', gap: isMobile ? '4px' : '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+        <button onClick={() => fileInputRef.current.click()} style={currentBtnStyle} title="PDF 불러오기"><FileUp size={iconSize}/></button>
         <input type="file" ref={fileInputRef} onChange={onFileChange} accept="application/pdf" hidden />
-        <button onClick={onOpenPageSelector} style={btnStyle} title="페이지 목록"><LayoutGrid size={20}/></button>
-        <button onClick={onUndo} disabled={!canUndo} style={!canUndo ? disabledBtnStyle : btnStyle} title="실행 취소"><Undo size={20}/></button>
-        <button onClick={onRedo} disabled={!canRedo} style={!canRedo ? disabledBtnStyle : btnStyle} title="다시 실행"><Redo size={20}/></button>
-        <div style={dividerHorizontal} />
-        <button onClick={() => setTool('hand')} style={tool === 'hand' ? activeBtn : btnStyle}><Hand size={20}/></button>
+        <button onClick={onOpenPageSelector} style={currentBtnStyle} title="페이지 목록"><LayoutGrid size={iconSize}/></button>
+        <button onClick={onUndo} disabled={!canUndo} style={!canUndo ? currentDisabledBtn : currentBtnStyle} title="실행 취소"><Undo size={iconSize}/></button>
+        <button onClick={onRedo} disabled={!canRedo} style={!canRedo ? currentDisabledBtn : currentBtnStyle} title="다시 실행"><Redo size={iconSize}/></button>
+        <div style={{ ...dividerHorizontal, margin: isMobile ? '0 4px' : '0 8px' }} />
+        <button onClick={() => setTool('hand')} style={tool === 'hand' ? currentActiveBtn : currentBtnStyle}><Hand size={iconSize}/></button>
         
         {pens.map((pen, index) => (
           <div key={index} style={{ position: 'relative' }}>
@@ -101,10 +108,10 @@ const FloatingToolbar = React.memo(({
                   setTool('pen'); setActivePenId(index); setShowPenSettings(false); 
                 }
               }} 
-              style={(tool === 'pen' && activePenId === index) ? activeBtn : btnStyle}
+              style={(tool === 'pen' && activePenId === index) ? currentActiveBtn : currentBtnStyle}
               title={`펜 ${index + 1} (클릭하여 설정)`}
             >
-              {pen.type === 'highlighter' ? <Highlighter size={20}/> : pen.type === 'pressure' ? <PenTool size={20}/> : pen.type === 'smart' ? <Sparkles size={20}/> : <Pencil size={20}/>}
+              {pen.type === 'highlighter' ? <Highlighter size={iconSize}/> : pen.type === 'pressure' ? <PenTool size={iconSize}/> : pen.type === 'smart' ? <Sparkles size={iconSize}/> : <Pencil size={iconSize}/>}
               <div style={{ position: 'absolute', bottom: 4, right: 4, width: 6, height: 6, borderRadius: '50%', backgroundColor: pen.color, border: '1px solid rgba(0,0,0,0.1)' }}/>
             </button>
           </div>
@@ -142,7 +149,7 @@ const FloatingToolbar = React.memo(({
           )}
         </div>
 
-        <button onClick={() => setTool('eraser')} style={tool === 'eraser' ? activeBtn : btnStyle}><Eraser size={20}/></button>
+        <button onClick={() => setTool('eraser')} style={tool === 'eraser' ? currentActiveBtn : currentBtnStyle}><Eraser size={iconSize}/></button>
         
         {/* 전체 삭제 버튼 및 팝업 */}
         <div style={{ position: 'relative' }} ref={clearConfirmRef}>
@@ -165,13 +172,13 @@ const FloatingToolbar = React.memo(({
               }} />
             </div>
           )}
-          <button onClick={() => setShowClearConfirm(!showClearConfirm)} style={btnStyle} title="전체 삭제"><Trash2 size={20}/></button>
+          <button onClick={() => setShowClearConfirm(!showClearConfirm)} style={currentBtnStyle} title="전체 삭제"><Trash2 size={iconSize}/></button>
         </div>
 
-        <button onClick={handleCropTool} style={(tool === 'crop' || hasMask) ? activeBtn : btnStyle} title={hasMask ? "마스킹 해제" : "영역 잘라내기"}><Crop size={20}/></button>
+        <button onClick={handleCropTool} style={(tool === 'crop' || hasMask) ? currentActiveBtn : currentBtnStyle} title={hasMask ? "마스킹 해제" : "영역 잘라내기"}><Crop size={iconSize}/></button>
       </div>
       
-      <div style={dividerHorizontal} />
+      <div style={{ ...dividerHorizontal, margin: isMobile ? '0 4px' : '0 8px' }} />
 
       <div ref={zoomControlRef} style={{ display: 'flex', flexDirection: 'row', gap: '12px', alignItems: 'center', position: 'relative' }}>
         <span onClick={() => setShowZoomSlider(!showZoomSlider)} style={{ fontSize: '13px', color: '#666', fontWeight: 'bold', cursor: 'pointer', userSelect: 'none' }}>
@@ -192,14 +199,14 @@ const FloatingToolbar = React.memo(({
           </div>, document.body
         )}
 
-        <button onClick={onResetZoom} style={btnStyle}><RotateCcw size={18}/></button>
+        <button onClick={onResetZoom} style={currentBtnStyle}><RotateCcw size={isMobile ? 16 : 18}/></button>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', margin: '0 4px' }}>
-          <button onClick={onPrevPage} disabled={currPage <= 1} style={currPage <= 1 ? disabledBtnStyle : btnStyle}><ChevronLeft size={18}/></button>
+          <button onClick={onPrevPage} disabled={currPage <= 1} style={currPage <= 1 ? currentDisabledBtn : currentBtnStyle}><ChevronLeft size={isMobile ? 16 : 18}/></button>
           <span style={{ fontSize: '12px', color: '#555', minWidth: '40px', textAlign: 'center', userSelect: 'none' }}>{currPage} / {numPages || '-'}</span>
-          <button onClick={onNextPage} disabled={!numPages || currPage >= numPages} style={(!numPages || currPage >= numPages) ? disabledBtnStyle : btnStyle}><ChevronRight size={18}/></button>
+          <button onClick={onNextPage} disabled={!numPages || currPage >= numPages} style={(!numPages || currPage >= numPages) ? currentDisabledBtn : currentBtnStyle}><ChevronRight size={isMobile ? 16 : 18}/></button>
         </div>
-        <button onClick={toggleFullScreen} style={btnStyle}>
-          {isFullScreen ? <Minimize size={18}/> : <Maximize size={18}/>}
+        <button onClick={toggleFullScreen} style={currentBtnStyle}>
+          {isFullScreen ? <Minimize size={isMobile ? 16 : 18}/> : <Maximize size={isMobile ? 16 : 18}/>}
         </button>
       </div>
     </div>
@@ -214,6 +221,19 @@ const SmartBoardApp = () => {
   // 2. 툴바 팝업 상태를 상위 컴포넌트로 이동 (드로잉 시 닫기 위해)
   const [showPenSettings, setShowPenSettings] = useState(false);
   const [showZoomSlider, setShowZoomSlider] = useState(false);
+
+  // 화면 크기 상태 관리 (반응형)
+  const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setDimensions({ width: window.innerWidth, height: window.innerHeight });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isMobile = dimensions.width < 768; // 모바일 기준 (태블릿 미만)
 
   // 드로잉 시작 시 팝업 닫기 래퍼 함수
   const handleStageMouseDown = (e) => {
@@ -234,14 +254,14 @@ const SmartBoardApp = () => {
       <div style={{ display: 'none' }}>
         {board.pdfFile && (
           <Document file={board.pdfFile} onLoadSuccess={board.onDocumentLoadSuccess}>
-            <Page pageNumber={board.currPage} onRenderSuccess={board.onRenderSuccess} width={window.innerWidth} renderTextLayer={false} renderAnnotationLayer={false} />
+            <Page pageNumber={board.currPage} onRenderSuccess={board.onRenderSuccess} width={dimensions.width} renderTextLayer={false} renderAnnotationLayer={false} />
           </Document>
         )}
       </div>
 
       <div style={{ width: '100%', height: '100%', cursor: board.tool === 'hand' ? 'grab' : 'crosshair' }}>
         <Stage
-          width={window.innerWidth} height={window.innerHeight}
+          width={dimensions.width} height={dimensions.height}
           scaleX={board.stageScale} scaleY={board.stageScale}
           x={board.stagePos.x} y={board.stagePos.y}
           onMouseDown={handleStageMouseDown} onMouseMove={board.handleMouseMove} onMouseUp={board.handleMouseUp}
@@ -253,9 +273,9 @@ const SmartBoardApp = () => {
         >
           {/* 배경 및 PDF 레이어 */}
           <Layer>
-            <Rect width={window.innerWidth * 20} height={window.innerHeight * 20} x={-window.innerWidth * 10} y={-window.innerHeight * 10} fill={board.bgColor} />
+            <Rect width={dimensions.width * 20} height={dimensions.height * 20} x={-dimensions.width * 10} y={-dimensions.height * 10} fill={board.bgColor} />
             {board.pdfImage && (
-              <Image image={board.pdfImage} x={0} y={0} width={window.innerWidth} height={(window.innerWidth * board.pdfImage.height) / board.pdfImage.width} shadowBlur={5} shadowColor="rgba(0,0,0,0.1)" />
+              <Image image={board.pdfImage} x={0} y={0} width={dimensions.width} height={(dimensions.width * board.pdfImage.height) / board.pdfImage.width} shadowBlur={5} shadowColor="rgba(0,0,0,0.1)" />
             )}
           </Layer>
 
@@ -315,7 +335,7 @@ const SmartBoardApp = () => {
   ), [
     board.pdfFile, board.pdfImage, board.lines, board.tool, board.stageScale, board.stagePos, board.bgColor, 
     board.currentCrop, board.onRenderSuccess, board.handleMouseDown, board.handleMouseMove, board.handleMouseUp, 
-    board.handleTouchStart, board.handleTouchMove, board.handleTouchEnd, board.handleWheel, board.currPage, board.onDocumentLoadSuccess,
+    board.handleTouchStart, board.handleTouchMove, board.handleTouchEnd, board.handleWheel, board.currPage, board.onDocumentLoadSuccess, dimensions,
     // 의존성 추가 (팝업 상태 변경 시 리렌더링은 필요 없지만 함수 재생성을 위해)
     // handleStageMouseDown, handleStageTouchStart는 내부에서 state setter만 호출하므로 안정적임
   ]);
@@ -336,6 +356,7 @@ const SmartBoardApp = () => {
         onUndo={board.undo} onRedo={board.redo} canUndo={board.canUndo} canRedo={board.canRedo}
         showPenSettings={showPenSettings} setShowPenSettings={setShowPenSettings}
         showZoomSlider={showZoomSlider} setShowZoomSlider={setShowZoomSlider}
+        isMobile={isMobile}
       />
 
       {/* 페이지 선택 모달 */}

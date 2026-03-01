@@ -93,6 +93,15 @@ const DragonPart = ({ clipPath, origin, animate, transition, zIndex }) => (
 
 const DevourskyWhiteLineBackground = () => {
   const [showSmartBoard, setShowSmartBoard] = useState(false);
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isMobile = windowWidth < 768;
 
   if (showSmartBoard) {
     return <SmartBoardApp />;
@@ -155,14 +164,14 @@ const DevourskyWhiteLineBackground = () => {
         onClick={() => setShowSmartBoard(true)}
         style={{
           position: 'absolute',
-          bottom: '50px',
+          bottom: isMobile ? '30px' : '50px',
           zIndex: 20,
           background: 'rgba(255, 255, 255, 0.05)',
           border: '1px solid rgba(255, 255, 255, 0.2)',
           borderRadius: '30px',
-          padding: '12px 40px',
+          padding: isMobile ? '10px 24px' : '12px 40px',
           color: 'rgba(255, 255, 255, 0.6)',
-          fontSize: '16px',
+          fontSize: isMobile ? '14px' : '16px',
           letterSpacing: '2px',
           cursor: 'pointer',
           backdropFilter: 'blur(4px)',
