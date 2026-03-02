@@ -212,26 +212,6 @@ export const useSmartBoard = () => {
     
     await page.render({ canvasContext: ctx, viewport, intent: 'display' }).promise;
     
-    // [수정] 화면이 회색으로 변하는 문제 해결을 위해 자동 색상 추출 비활성화
-    /*
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    const colorCounts = {};
-    let maxCount = 0;
-    let dominantColor = '#ffffff';
-
-    const step = 4 * 50; 
-    for (let i = 0; i < data.length; i += step) {
-      const hex = "#" + ((1 << 24) + (data[i] << 16) + (data[i + 1] << 8) + data[i + 2]).toString(16).slice(1);
-      colorCounts[hex] = (colorCounts[hex] || 0) + 1;
-      if (colorCounts[hex] > maxCount) {
-        maxCount = colorCounts[hex];
-        dominantColor = hex;
-      }
-    }
-    setBgColor(dominantColor);
-    */
-    
     setBgColor('#ffffff'); // 항상 깨끗한 흰색 배경으로 고정
 
     try {

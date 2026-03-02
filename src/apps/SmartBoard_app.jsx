@@ -567,7 +567,7 @@ const SmartBoardApp = () => {
                   <div key={`page_${index + 1}`} onClick={() => board.changePage(index + 1)} 
                     style={{ ...thumbnailStyle, border: board.currPage === index + 1 ? '2px solid #6366f1' : '1px solid #eee', backgroundColor: board.currPage === index + 1 ? '#eef2ff' : 'white' }}>
                     <div style={{ pointerEvents: 'none' }}>
-                      <Page pageNumber={index + 1} width={150} renderTextLayer={false} renderAnnotationLayer={false} />
+                      <Page pageNumber={index + 1} width={75} renderTextLayer={false} renderAnnotationLayer={false} />
                     </div>
                     <span style={{ marginTop: '8px', fontSize: '14px', fontWeight: '500', color: '#555' }}>{index + 1}</span>
                   </div>
@@ -589,7 +589,7 @@ const disabledBtnStyle = { ...btnStyle, opacity: 0.5, cursor: 'not-allowed', bac
 const dividerHorizontal = { width: '1px', height: '20px', background: '#eee', margin: '0 8px' };
 const modalOverlayStyle = { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(5px)' };
 const modalContentStyle = { width: '80%', height: '80%', backgroundColor: 'white', borderRadius: '16px', padding: '24px', overflowY: 'auto', boxShadow: '0 20px 50px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column' };
-const gridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '20px', padding: '10px', width: '100%' };
+const gridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '10px', padding: '10px', width: '100%' };
 const thumbnailStyle = { display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', padding: '10px', borderRadius: '12px', transition: 'all 0.2s', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' };
 const driveFileItemStyle = { padding: '12px', border: '1px solid #eee', borderRadius: '8px', background: '#f9fafb', color: '#333', cursor: 'pointer', textAlign: 'left', fontSize: '14px', transition: 'background 0.2s', userSelect: 'none' };
 
