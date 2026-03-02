@@ -7,10 +7,16 @@ import { FileUp, Hand, Pencil, Eraser, RotateCcw, Crop, Maximize, Minimize, High
 import { useSmartBoard, colorPalette } from './SmartBoard_hooks'; // 만들어둔 훅 임포트
 
 // 최신 라이브러리 환경에 맞는 워커 설정
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+try {
+  if (typeof pdfjs !== 'undefined' && pdfjs.version) {
+    pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+  }
+} catch (e) {
+  console.warn("PDF Worker setup failed:", e);
+}
 
 // --- [설정] 스플라인 품질 (조절 가능) ---
-const SPLINE_QUALITY = 20; // [조절] 점과 점 사이를 몇 단계로 보간할지 설정 (기본값: 8~10)
+const SPLINE_QUALITY = 8; // [조절] 점과 점 사이를 몇 단계로 보간할지 설정 (기본값: 8~10)
                           // * 값을 높이면(예: 20) 곡선이 매우 부드러워지지만, 렌더링 성능이 떨어질 수 있습니다.
                           // * 값을 낮추면(예: 4) 성능은 좋아지지만, 곡선이 조금 각져 보일 수 있습니다.
 
@@ -23,12 +29,21 @@ const catmullRom = (p0, p1, p2, p3, t) => {
   return (2 * p1 - 2 * p2 + v0 + v1) * t3 + (-3 * p1 + 3 * p2 - 2 * v0 - v1) * t2 + v0 * t + p1;
 };
 
+// 헬퍼: 안전하게 두께 가져오기
+const getWidth = (widths, index) => {
+  if (!widths || widths.length === 0) return 1;
+  if (index < 0) return widths[0];
+  if (index >= widths.length) return widths[widths.length - 1];
+  return widths[index];
+};
+
 // --- [추가] 필압 펜 렌더링 컴포넌트 ---
 const PressureLine = ({ points, widths, color }) => (
   <Shape
     sceneFunc={(ctx, shape) => {
-      if (!points || points.length < 4 || !widths) return;
+      if (!points || points.length < 4 || !widths || widths.length === 0) return;
       
+      try {
       // ==================================================================================
       // [이전 로직] 직선(사다리꼴) 연결 방식 - (비활성화됨: 주석 처리)
       // ==================================================================================
@@ -100,10 +115,10 @@ const PressureLine = ({ points, widths, color }) => (
         const p3y = i === numPoints - 2 ? p2y : points[(i + 2) * 2 + 1];
 
         // 두께도 함께 보간
-        const w0 = i === 0 ? widths[0] : widths[i - 1];
-        const w1 = widths[i];
-        const w2 = widths[i + 1];
-        const w3 = i === numPoints - 2 ? w2 : widths[i + 2];
+        const w0 = getWidth(widths, i - 1);
+        const w1 = getWidth(widths, i);
+        const w2 = getWidth(widths, i + 1);
+        const w3 = getWidth(widths, i + 2);
 
         // 구간 보간
         for (let j = 0; j < SPLINE_QUALITY; j++) {
@@ -111,6 +126,8 @@ const PressureLine = ({ points, widths, color }) => (
           const x = catmullRom(p0x, p1x, p2x, p3x, t);
           const y = catmullRom(p0y, p1y, p2y, p3y, t);
           const w = catmullRom(w0, w1, w2, w3, t);
+
+          if (isNaN(x) || isNaN(y) || isNaN(w)) continue; // 안전장치
           
           interpolatedPoints.push({ x, y });
           interpolatedWidths.push(Math.max(0.1, w)); // 두께 최소값 보정
@@ -119,7 +136,7 @@ const PressureLine = ({ points, widths, color }) => (
       
       // 마지막 점 추가
       interpolatedPoints.push({ x: points[points.length - 2], y: points[points.length - 1] });
-      interpolatedWidths.push(widths[widths.length - 1]);
+      interpolatedWidths.push(getWidth(widths, widths.length - 1));
 
       // 2. 외곽선(Envelope) 생성
       const leftPath = [];
@@ -179,6 +196,9 @@ const PressureLine = ({ points, widths, color }) => (
         ctx.closePath();
         ctx.fillStyle = color;
         ctx.fill();
+      }
+      } catch (e) {
+        // 렌더링 오류 무시
       }
     }}
   />
