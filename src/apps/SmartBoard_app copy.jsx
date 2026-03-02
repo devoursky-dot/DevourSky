@@ -4,8 +4,9 @@ import { createPortal } from 'react-dom';
 import { Stage, Layer, Image, Rect, Line, Ellipse, Path, Shape } from 'react-konva';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { FileUp, Hand, Pencil, Eraser, RotateCcw, Crop, Maximize, Minimize, Highlighter, PenTool, LayoutGrid, ChevronLeft, ChevronRight, Trash2, Undo, Redo, Sparkles, Folder, X } from 'lucide-react';
-import { useSmartBoard, colorPalette } from './SmartBoard_hooks'; 
+import { useSmartBoard, colorPalette } from './SmartBoard_hooks'; // 만들어둔 훅 임포트
 
+// 최신 라이브러리 환경에 맞는 워커 설정
 try {
   if (typeof pdfjs !== 'undefined' && pdfjs.version) {
     pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -15,11 +16,15 @@ try {
 }
 
 // --- [설정] 구글 드라이브 API 및 폴더 설정 ---
-const GOOGLE_API_KEY = 'AIzaSyCiVnPpyg9xkhkiacbFmkE05tjy4Z7omko'; 
-const GOOGLE_FOLDER_ID = '1dfp2p0z9QhpDf5Koz3gHL2glKTkXoDIq'; 
+const GOOGLE_API_KEY = 'AIzaSyCiVnPpyg9xkhkiacbFmkE05tjy4Z7omko'; // 여기에 구글 API 키를 입력하세요
+const GOOGLE_FOLDER_ID = '1dfp2p0z9QhpDf5Koz3gHL2glKTkXoDIq'; // 여기에 공유 폴더 ID를 입력하세요
 
-const SPLINE_QUALITY = 8; 
+// --- [설정] 스플라인 품질 (조절 가능) ---
+const SPLINE_QUALITY = 8; // [조절] 점과 점 사이를 몇 단계로 보간할지 설정 (기본값: 8~10)
+                          // * 값을 높이면(예: 20) 곡선이 매우 부드러워지지만, 렌더링 성능이 떨어질 수 있습니다.
+                          // * 값을 낮추면(예: 4) 성능은 좋아지지만, 곡선이 조금 각져 보일 수 있습니다.
 
+// 헬퍼: 캣멀-롬 스플라인 보간 함수 (Catmull-Rom Spline Interpolation)
 const catmullRom = (p0, p1, p2, p3, t) => {
   const v0 = (p2 - p0) * 0.5;
   const v1 = (p3 - p1) * 0.5;
@@ -28,6 +33,7 @@ const catmullRom = (p0, p1, p2, p3, t) => {
   return (2 * p1 - 2 * p2 + v0 + v1) * t3 + (-3 * p1 + 3 * p2 - 2 * v0 - v1) * t2 + v0 * t + p1;
 };
 
+// 헬퍼: 안전하게 두께 가져오기
 const getWidth = (widths, index) => {
   if (!widths || widths.length === 0) return 1;
   if (index < 0) return widths[0];
@@ -35,21 +41,71 @@ const getWidth = (widths, index) => {
   return widths[index];
 };
 
+// --- [추가] 필압 펜 렌더링 컴포넌트 ---
 const PressureLine = ({ points, widths, color }) => (
   <Shape
     sceneFunc={(ctx, shape) => {
       if (!points || points.length < 4 || !widths || widths.length === 0) return;
       
       try {
+      // ==================================================================================
+      // [이전 로직] 직선(사다리꼴) 연결 방식 - (비활성화됨: 주석 처리)
+      // ==================================================================================
+      /*
+      ctx.beginPath();
+      for (let i = 0; i < points.length - 2; i += 2) {
+        const x1 = points[i], y1 = points[i+1];
+        const x2 = points[i+2], y2 = points[i+3];
+        
+        const w1 = widths[i/2] || widths[0];
+        const w2 = widths[i/2+1] || w1;
+        
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        const sin = Math.sin(angle);
+        const cos = Math.cos(angle);
+        
+        const p1l_x = x1 + sin * w1 / 2;
+        const p1l_y = y1 - cos * w1 / 2;
+        const p1r_x = x1 - sin * w1 / 2;
+        const p1r_y = y1 + cos * w1 / 2;
+        
+        const p2l_x = x2 + sin * w2 / 2;
+        const p2l_y = y2 - cos * w2 / 2;
+        const p2r_x = x2 - sin * w2 / 2;
+        const p2r_y = y2 + cos * w2 / 2;
+        
+        ctx.moveTo(p1l_x, p1l_y);
+        ctx.lineTo(p2l_x, p2l_y);
+        ctx.lineTo(p2r_x, p2r_y);
+        ctx.lineTo(p1r_x, p1r_y);
+        
+        ctx.moveTo(x1 + w1/2, y1);
+        ctx.arc(x1, y1, w1/2, 0, Math.PI * 2);
+      }
+      
+      const lastI = points.length - 2;
+      const lastW = widths[widths.length - 1] || widths[0];
+      ctx.moveTo(points[lastI] + lastW/2, points[lastI+1]);
+      ctx.arc(points[lastI], points[lastI+1], lastW/2, 0, Math.PI * 2);
+      
+      ctx.fillStyle = color;
+      ctx.fill();
+      */
+
+      // ==================================================================================
+      // [새로운 로직] 스플라인 곡선 (Catmull-Rom Spline) + 가변 두께 (Envelope)
+      // ==================================================================================
       ctx.beginPath();
 
       const numPoints = points.length / 2;
       if (numPoints < 2) return;
 
+      // 1. 보간된 점과 두께 계산 (Interpolation)
       const interpolatedPoints = [];
       const interpolatedWidths = [];
 
       for (let i = 0; i < numPoints - 1; i++) {
+        // Catmull-Rom 제어점 4개 (p0, p1, p2, p3)
         const p0x = i === 0 ? points[0] : points[(i - 1) * 2];
         const p0y = i === 0 ? points[1] : points[(i - 1) * 2 + 1];
         
@@ -62,27 +118,31 @@ const PressureLine = ({ points, widths, color }) => (
         const p3x = i === numPoints - 2 ? p2x : points[(i + 2) * 2];
         const p3y = i === numPoints - 2 ? p2y : points[(i + 2) * 2 + 1];
 
+        // 두께도 함께 보간
         const w0 = getWidth(widths, i - 1);
         const w1 = getWidth(widths, i);
         const w2 = getWidth(widths, i + 1);
         const w3 = getWidth(widths, i + 2);
 
+        // 구간 보간
         for (let j = 0; j < SPLINE_QUALITY; j++) {
           const t = j / SPLINE_QUALITY;
           const x = catmullRom(p0x, p1x, p2x, p3x, t);
           const y = catmullRom(p0y, p1y, p2y, p3y, t);
           const w = catmullRom(w0, w1, w2, w3, t);
 
-          if (isNaN(x) || isNaN(y) || isNaN(w)) continue; 
+          if (isNaN(x) || isNaN(y) || isNaN(w)) continue; // 안전장치
           
           interpolatedPoints.push({ x, y });
-          interpolatedWidths.push(Math.max(0.1, w)); 
+          interpolatedWidths.push(Math.max(0.1, w)); // 두께 최소값 보정
         }
       }
       
+      // 마지막 점 추가
       interpolatedPoints.push({ x: points[points.length - 2], y: points[points.length - 1] });
       interpolatedWidths.push(getWidth(widths, widths.length - 1));
 
+      // 2. 외곽선(Envelope) 생성
       const leftPath = [];
       const rightPath = [];
 
@@ -95,10 +155,12 @@ const PressureLine = ({ points, widths, color }) => (
         const sin = Math.sin(angle);
         const cos = Math.cos(angle);
 
+        // 중심선에서 법선 방향으로 두께만큼 벌림
         leftPath.push({ x: p1.x + sin * w / 2, y: p1.y - cos * w / 2 });
         rightPath.push({ x: p1.x - sin * w / 2, y: p1.y + cos * w / 2 });
       }
 
+      // 마지막 점 처리 (이전 점의 각도 유지)
       const lastIdx = interpolatedPoints.length - 1;
       const lastP = interpolatedPoints[lastIdx];
       const lastW = interpolatedWidths[lastIdx];
@@ -112,18 +174,23 @@ const PressureLine = ({ points, widths, color }) => (
         rightPath.push({ x: lastP.x - sin * lastW / 2, y: lastP.y + cos * lastW / 2 });
       }
 
+      // 3. 경로 그리기
       if (leftPath.length > 0) {
+        // 왼쪽 외곽선
         ctx.moveTo(leftPath[0].x, leftPath[0].y);
         for (let i = 1; i < leftPath.length; i++) {
           ctx.lineTo(leftPath[i].x, leftPath[i].y);
         }
         
+        // 끝점 둥글게 (반원)
         ctx.arc(lastP.x, lastP.y, lastW / 2, Math.atan2(lastP.y - prevP.y, lastP.x - prevP.x) - Math.PI / 2, Math.atan2(lastP.y - prevP.y, lastP.x - prevP.x) + Math.PI / 2);
 
+        // 오른쪽 외곽선 (거꾸로)
         for (let i = rightPath.length - 1; i >= 0; i--) {
           ctx.lineTo(rightPath[i].x, rightPath[i].y);
         }
 
+        // 시작점 둥글게 (반원)
         const firstP = interpolatedPoints[0];
         const firstW = interpolatedWidths[0];
         const firstNextP = interpolatedPoints[1];
@@ -135,11 +202,13 @@ const PressureLine = ({ points, widths, color }) => (
         ctx.fill();
       }
       } catch (e) {
+        // 렌더링 오류 무시
       }
     }}
   />
 );
 
+// --- [UI 전용 컴포넌트] 플로팅 툴바 ---
 const FloatingToolbar = React.memo(({ 
   tool, setTool, pens, activePenId, setActivePenId, updateActivePen, activePen,
   stageScale, onZoomChange, onResetZoom,
@@ -149,8 +218,9 @@ const FloatingToolbar = React.memo(({
   currPage, numPages, onPrevPage, onNextPage, onClearAll, 
   onUndo, onRedo, canUndo, canRedo,
   showPenSettings, setShowPenSettings, showZoomSlider, setShowZoomSlider,
-  isMobile, loadPdf // loadPdf 함수 props로 받기
+  isMobile
 }) => {
+  // 툴바 내부의 UI 상태 (팝업 열림/닫힘 등)는 툴바 스스로 관리합니다.
   const [penSettingsPos, setPenSettingsPos] = useState({ top: 0, left: 0 });
   const [loadMenuPos, setLoadMenuPos] = useState({ top: 0, left: 0 });
   const [sliderPos, setSliderPos] = useState({ top: 0, left: 0 });
@@ -235,25 +305,7 @@ const FloatingToolbar = React.memo(({
     }
   };
 
-  // [추가] 파일 더블클릭 시 PDF 다운로드 및 로드 처리
-  const handleFileDoubleClick = async (fileId) => {
-    setIsLoadingDrive(true);
-    try {
-      const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${GOOGLE_API_KEY}`);
-      if (!response.ok) {
-        throw new Error("파일 다운로드 실패. 파일이 공개 상태인지 확인하세요.");
-      }
-      const blob = await response.blob();
-      loadPdf(blob); // 훅의 loadPdf 호출하여 파일 로드
-      setShowDriveModal(false); // 로드 완료 후 모달 닫기
-    } catch (error) {
-      console.error(error);
-      alert("파일을 불러오는 데 실패했습니다: " + error.message);
-    } finally {
-      setIsLoadingDrive(false);
-    }
-  };
-
+  // 반응형 스타일 적용
   const currentBtnStyle = isMobile ? { ...btnStyle, padding: '6px' } : btnStyle;
   const currentActiveBtn = isMobile ? { ...activeBtn, padding: '6px' } : activeBtn;
   const currentDisabledBtn = isMobile ? { ...disabledBtnStyle, padding: '6px' } : disabledBtnStyle;
@@ -398,23 +450,13 @@ const FloatingToolbar = React.memo(({
               <h3 style={{ margin: 0, color: '#333' }}>구글 공유폴더 파일</h3>
               <button onClick={() => setShowDriveModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#666' }}><X size={20}/></button>
             </div>
-            {isLoadingDrive ? (
-              <p style={{ textAlign: 'center', color: '#666', padding: '20px' }}>파일을 다운로드 중입니다...</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto' }}>
-                {driveFiles.length === 0 ? <p style={{ color: '#666', textAlign: 'center' }}>파일이 없습니다.</p> : driveFiles.map(file => (
-                  <div 
-                    key={file.id} 
-                    style={driveFileItemStyle}
-                    // [추가] 더블클릭 이벤트 연결
-                    onDoubleClick={() => handleFileDoubleClick(file.id)}
-                    title="더블클릭하여 파일 열기"
-                  >
-                    {file.name}
-                  </div>
-                ))}
-              </div>
-            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto' }}>
+              {driveFiles.length === 0 ? <p style={{ color: '#666', textAlign: 'center' }}>파일이 없습니다.</p> : driveFiles.map(file => (
+                <div key={file.id} style={driveFileItemStyle}>
+                  {file.name}
+                </div>
+              ))}
+            </div>
           </div>
         </div>, document.body
       )}
@@ -422,12 +464,16 @@ const FloatingToolbar = React.memo(({
   );
 });
 
+// --- [메인 앱 (컨트롤 타워)] ---
 const SmartBoardApp = () => {
+  // 1. 훅에서 모든 로직과 상태를 가져옵니다.
   const board = useSmartBoard();
 
+  // 2. 툴바 팝업 상태를 상위 컴포넌트로 이동 (드로잉 시 닫기 위해)
   const [showPenSettings, setShowPenSettings] = useState(false);
   const [showZoomSlider, setShowZoomSlider] = useState(false);
 
+  // 화면 크기 상태 관리 (반응형)
   const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
 
   useEffect(() => {
@@ -438,8 +484,9 @@ const SmartBoardApp = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const isMobile = dimensions.width < 768; 
+  const isMobile = dimensions.width < 768; // 모바일 기준 (태블릿 미만)
 
+  // 드로잉 시작 시 팝업 닫기 래퍼 함수
   const handleStageMouseDown = (e) => {
     setShowPenSettings(false);
     setShowZoomSlider(false);
@@ -452,6 +499,7 @@ const SmartBoardApp = () => {
     board.handleTouchStart(e);
   };
 
+  // 2. 메인 캔버스 렌더링 최적화
   const boardContent = useMemo(() => (
     <>
       <div style={{ display: 'none' }}>
@@ -474,6 +522,7 @@ const SmartBoardApp = () => {
           onDragEnd={(e) => board.setStagePos({ x: e.target.x(), y: e.target.y() })}
           ref={board.stageRef}
         >
+          {/* 배경 및 PDF 레이어 */}
           <Layer>
             <Rect width={dimensions.width * 20} height={dimensions.height * 20} x={-dimensions.width * 10} y={-dimensions.height * 10} fill={board.bgColor} />
             {board.pdfImage && (
@@ -481,19 +530,24 @@ const SmartBoardApp = () => {
             )}
           </Layer>
 
+          {/* 마스킹 레이어 */}
           <Layer>
             {board.lines.map((line, i) => line.tool === 'rect' ? (
               <Rect key={i} x={line.x} y={line.y} width={line.width} height={line.height} fill={line.fill} />
             ) : null)}
           </Layer>
 
+          {/* 판서 레이어 */}
           <Layer>
+            {/* 타원/원 렌더링 */}
             {board.lines.map((line, i) => line.tool === 'ellipse' ? (
               <React.Fragment key={i}>
+                {/* 타원 */}
                 <Ellipse x={line.x + line.width/2} y={line.y + line.height/2} radiusX={Math.abs(line.width)/2} radiusY={Math.abs(line.height)/2} stroke={line.color} strokeWidth={line.strokeWidth} fillEnabled={false} />
               </React.Fragment>
             ) : null)}
 
+            {/* 스마트 곡선 (Path) 렌더링 */}
             {board.lines.map((line, i) => line.tool === 'smart_path' ? (
               <Path
                 key={i}
@@ -507,10 +561,12 @@ const SmartBoardApp = () => {
               />
             ) : null)}
 
+            {/* [추가] 필압 펜 렌더링 */}
             {board.lines.map((line, i) => line.penType === 'pressure' ? (
               <PressureLine key={i} points={line.points} widths={line.widths} color={line.color} />
             ) : null)}
 
+            {/* 선/곡선 렌더링 (필압 펜 제외) */}
             {board.lines.map((line, i) => {
               if (line.tool !== 'rect' && line.tool !== 'ellipse' && line.tool !== 'smart_path' && line.penType !== 'pressure') {
                 return (
@@ -536,11 +592,14 @@ const SmartBoardApp = () => {
     board.pdfFile, board.pdfImage, board.lines, board.tool, board.stageScale, board.stagePos, board.bgColor, 
     board.currentCrop, board.onRenderSuccess, board.handleMouseDown, board.handleMouseMove, board.handleMouseUp, 
     board.handleTouchStart, board.handleTouchMove, board.handleTouchEnd, board.handleWheel, board.currPage, board.onDocumentLoadSuccess, dimensions,
+    // 의존성 추가 (팝업 상태 변경 시 리렌더링은 필요 없지만 함수 재생성을 위해)
+    // handleStageMouseDown, handleStageTouchStart는 내부에서 state setter만 호출하므로 안정적임
   ]);
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#222', overflow: 'hidden' }}>
       
+      {/* 플로팅 툴바에 필요한 데이터와 함수만 넘겨줌 */}
       <FloatingToolbar 
         tool={board.tool} setTool={board.setTool} pens={board.pens} activePenId={board.activePenId} setActivePenId={board.setActivePenId}
         updateActivePen={board.updateActivePen} activePen={board.activePen}
@@ -554,9 +613,9 @@ const SmartBoardApp = () => {
         showPenSettings={showPenSettings} setShowPenSettings={setShowPenSettings}
         showZoomSlider={showZoomSlider} setShowZoomSlider={setShowZoomSlider}
         isMobile={isMobile}
-        loadPdf={board.loadPdf} // [추가] 훅에서 받아온 함수 전달
       />
 
+      {/* 페이지 선택 모달 */}
       {board.showPageSelector && board.pdfFile && (
         <div style={modalOverlayStyle} onClick={() => board.setShowPageSelector(false)}>
           <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
@@ -583,6 +642,7 @@ const SmartBoardApp = () => {
   );
 };
 
+// --- 스타일링 속성 ---
 const btnStyle = { padding: '8px', border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', transition: 'all 0.2s' };
 const activeBtn = { ...btnStyle, background: '#eef2ff', border: '1px solid #6366f1', color: '#6366f1' };
 const disabledBtnStyle = { ...btnStyle, opacity: 0.5, cursor: 'not-allowed', background: '#f3f4f6' };
@@ -591,6 +651,6 @@ const modalOverlayStyle = { position: 'fixed', top: 0, left: 0, width: '100%', h
 const modalContentStyle = { width: '80%', height: '80%', backgroundColor: 'white', borderRadius: '16px', padding: '24px', overflowY: 'auto', boxShadow: '0 20px 50px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column' };
 const gridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '20px', padding: '10px', width: '100%' };
 const thumbnailStyle = { display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', padding: '10px', borderRadius: '12px', transition: 'all 0.2s', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' };
-const driveFileItemStyle = { padding: '12px', border: '1px solid #eee', borderRadius: '8px', background: '#f9fafb', color: '#333', cursor: 'pointer', textAlign: 'left', fontSize: '14px', transition: 'background 0.2s', userSelect: 'none' };
+const driveFileItemStyle = { padding: '12px', border: '1px solid #eee', borderRadius: '8px', background: '#f9fafb', color: '#333', cursor: 'pointer', textAlign: 'left', fontSize: '14px', transition: 'background 0.2s' };
 
 export default SmartBoardApp;

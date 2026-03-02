@@ -11,11 +11,13 @@ export const colorPalette = [
 
 // --- [설정] 속도 기반 필압 상수 ---
 const VELOCITY_PARAMS = {
-  minSpeed: 0.05,       
-  maxSpeed: 1.5,       
-  minWidthRatio: 0.2,  
-  maxWidthRatio: 1.2,  
-  smoothing: 0.1       
+  minSpeed: 0.05,       // [최소 속도] 이 속도 이하일 때 선이 가장 굵게 나옵니다. (천천히 쓸 때)
+  maxSpeed: 1.5,       // [최대 속도] 1.0은 너무 민감할 수 있어 2.5 정도로 조정 (일반적인 느린 필기 속도)
+                       // * 팁: 판서 속도가 느리다면 이 값을 낮추세요 (예: 2.5 ~ 3.5)
+                       // * 팁: 판서 속도가 빠르다면 이 값을 높이세요 (예: 5.0 ~ 8.0)
+  minWidthRatio: 0.2,  // [최소 두께 비율] 가장 얇을 때의 두께 (기본 두께 * 0.2)
+  maxWidthRatio: 1.2,  // [최대 두께 비율] 가장 굵을 때의 두께 (기본 두께 * 1.2)
+  smoothing: 0.1       // [보정 계수] 0.0 ~ 1.0. 값이 클수록 굵기 변화가 부드럽지만 반응이 느려질 수 있습니다.
 };
 
 // --- 헬퍼 함수 ---
@@ -87,8 +89,8 @@ export const useSmartBoard = () => {
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfImage, setPdfImage] = useState(null);
   const [lines, setLines] = useState([]);
-  const [history, setHistory] = useState([[]]); 
-  const [historyStep, setHistoryStep] = useState(0); 
+  const [history, setHistory] = useState([[]]); // 판서 기록 (초기값: 빈 배열)
+  const [historyStep, setHistoryStep] = useState(0); // 현재 기록 시점
   const [tool, setTool] = useState('pen');
   const [pens, setPens] = useState([
     { type: 'basic', color: '#000000', width: 3 },
@@ -110,24 +112,29 @@ export const useSmartBoard = () => {
   const lastDist = useRef(0);
   const lastCenter = useRef(null);
   const linesRef = useRef(lines);
-  const smartTimer = useRef(null); 
-  const isSmartShapeFixed = useRef(false); 
+  const smartTimer = useRef(null); // 스마트 펜 타이머
+  const isSmartShapeFixed = useRef(false); // 도형 변환 완료 여부
+  
+  // [추가] 필압 계산을 위한 이전 상태 저장 (시간, 좌표, 속도, 굵기)
   const lastPressureRef = useRef({ time: 0, x: 0, y: 0, velocity: 0, width: 0 });
 
   const activePen = pens[activePenId];
 
+  // 최신 lines 상태 동기화 (마스킹 토글 등에서 참조)
   useEffect(() => {
     linesRef.current = lines;
   }, [lines]);
 
+  // 전체화면 변경 이벤트 리스너
   useEffect(() => {
     const handleFullScreenChange = () => setIsFullScreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handleFullScreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
   }, []);
 
+  // --- History 관리 함수 ---
   const addToHistory = useCallback((newLines) => {
-    const newHistory = history.slice(0, historyStep + 1); 
+    const newHistory = history.slice(0, historyStep + 1); // 현재 시점 이후의 기록(Redo)은 날림
     newHistory.push(newLines);
     setHistory(newHistory);
     setHistoryStep(newHistory.length - 1);
@@ -161,19 +168,14 @@ export const useSmartBoard = () => {
     }
   }, []);
 
-  // [추가] 외부(구글 드라이브 등)에서 가져온 Blob 데이터를 로드하는 함수
-  const loadPdf = useCallback((fileOrBlob) => {
-    setPdfImage(null);
-    setPdfFile(fileOrBlob);
-    setCurrPage(1);
-  }, []);
-
   const handleFileChange = useCallback((e) => {
     const file = e.target.files[0];
     if (file) {
-      loadPdf(file);
+      setPdfImage(null);
+      setPdfFile(file);
+      setCurrPage(1);
     }
-  }, [loadPdf]);
+  }, []);
 
   const onDocumentLoadSuccess = useCallback(({ numPages }) => {
     setNumPages(numPages);
@@ -187,7 +189,7 @@ export const useSmartBoard = () => {
     setCurrPage(pageNumber);
     setShowPageSelector(false);
     setLines([]);
-    setHistory([[]]); 
+    setHistory([[]]); // 페이지 변경 시 기록 초기화
     setHistoryStep(0);
     setStageScale(1);
     setStagePos({ x: 0, y: 0 });
@@ -201,6 +203,7 @@ export const useSmartBoard = () => {
     if (numPages && currPage < numPages) changePage(currPage + 1);
   }, [currPage, numPages, changePage]);
 
+  // PDF 렌더링 및 배경색 추출
   const onRenderSuccess = useCallback(async (page) => {
     const renderScale = 3.0; 
     const viewport = page.getViewport({ scale: renderScale });
@@ -212,8 +215,6 @@ export const useSmartBoard = () => {
     
     await page.render({ canvasContext: ctx, viewport, intent: 'display' }).promise;
     
-    // [수정] 화면이 회색으로 변하는 문제 해결을 위해 자동 색상 추출 비활성화
-    /*
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
     const colorCounts = {};
@@ -230,9 +231,6 @@ export const useSmartBoard = () => {
       }
     }
     setBgColor(dominantColor);
-    */
-    
-    setBgColor('#ffffff'); // 항상 깨끗한 흰색 배경으로 고정
 
     try {
       const bitmap = await createImageBitmap(canvas);
@@ -244,6 +242,7 @@ export const useSmartBoard = () => {
     }
   }, []);
 
+  // --- 캔버스 마우스/터치 이벤트 로직 ---
   const handleMouseDown = useCallback((e) => {
     const stage = e.target.getStage();
     const pos = getRelativePointerPosition(stage);
@@ -254,6 +253,7 @@ export const useSmartBoard = () => {
       return;
     }
     
+    // 스마트 펜 초기화 (펜 타입이 smart일 경우)
     if (tool === 'pen' && activePen.type === 'smart') {
       isDrawing.current = true;
       isSmartShapeFixed.current = false;
@@ -261,6 +261,7 @@ export const useSmartBoard = () => {
 
     isDrawing.current = true;
     
+    // [수정] 필압 펜 초기화 로직 추가
     if (tool === 'pen' && activePen.type === 'pressure') {
       lastPressureRef.current = {
         time: Date.now(),
@@ -278,6 +279,7 @@ export const useSmartBoard = () => {
       strokeWidth: tool === 'eraser' ? 30 : activePen.width,
       opacity: tool === 'pen' && activePen.type === 'highlighter' ? 0.4 : 1,
       penType: tool === 'pen' ? activePen.type : 'basic',
+      // [추가] 필압 펜일 경우 굵기 배열 초기화
       widths: (tool === 'pen' && activePen.type === 'pressure') ? [activePen.width] : undefined
     };
 
@@ -300,35 +302,47 @@ export const useSmartBoard = () => {
       return;
     }
 
+    // [추가] 속도 기반 필압 계산 로직
     if (tool === 'pen' && activePen.type === 'pressure' && isDrawing.current) {
       const now = Date.now();
       const last = lastPressureRef.current;
       const dist = Math.sqrt(Math.pow(point.x - last.x, 2) + Math.pow(point.y - last.y, 2));
 
+      // 1. 스로틀링: 이동 거리가 너무 작으면(2px 미만) 계산 건너뜀 (스마트폰 떨림 방지)
+      // 단, 시간이 너무 오래 지났으면(50ms) 강제로 업데이트
       if (dist < 2 && (now - last.time) < 50) return;
 
-      const dt = Math.max(1, now - last.time); 
+      const dt = Math.max(1, now - last.time); // 0 나누기 방지
       const currVelocity = dist / dt;
 
+      // 2. 속도 스무딩 (이동 평균): 급격한 변화 방지
       const velocity = last.velocity * VELOCITY_PARAMS.smoothing + currVelocity * (1 - VELOCITY_PARAMS.smoothing);
 
+      // 3. 속도 -> 굵기 변환 (반비례 관계)
       const { minSpeed, maxSpeed, minWidthRatio, maxWidthRatio } = VELOCITY_PARAMS;
+      // 속도를 범위 내로 클램핑
       const clampedVel = Math.max(minSpeed, Math.min(velocity, maxSpeed));
+      // 0.0 ~ 1.0 사이 비율로 변환
       const ratio = (clampedVel - minSpeed) / (maxSpeed - minSpeed);
       
       const baseWidth = activePen.width;
       const minW = baseWidth * minWidthRatio;
       const maxW = baseWidth * maxWidthRatio;
       
+      // 속도가 빠를수록(ratio가 1에 가까울수록) 얇게(minW)
       const targetWidth = maxW - ratio * (maxW - minW);
 
+      // 4. 굵기 스무딩: 굵기도 급격하게 변하지 않도록 보정
       const width = last.width * VELOCITY_PARAMS.smoothing + targetWidth * (1 - VELOCITY_PARAMS.smoothing);
 
+      // 상태 업데이트
       lastPressureRef.current = { time: now, x: point.x, y: point.y, velocity, width };
 
       setLines(prev => {
         const lastLine = { ...prev[prev.length - 1] };
+        // 포인트 추가
         lastLine.points = lastLine.points.concat([point.x, point.y]);
+        // 굵기 추가 (배열이 없으면 생성)
         if (!lastLine.widths) lastLine.widths = [baseWidth];
         lastLine.widths = lastLine.widths.concat([width]);
         
@@ -338,14 +352,16 @@ export const useSmartBoard = () => {
     }
 
     if (tool === 'pen' && activePen.type === 'smart' && isDrawing.current) {
-      if (isSmartShapeFixed.current) return; 
+      if (isSmartShapeFixed.current) return; // 이미 변환되었으면 업데이트 중지
 
+      // 1. 선 그리기 업데이트
       setLines(prev => {
         const lastLine = { ...prev[prev.length - 1] };
         lastLine.points = lastLine.points.concat([point.x, point.y]);
         return [...prev.slice(0, -1), lastLine];
       });
 
+      // 2. 멈춤 감지 타이머 (600ms)
       if (smartTimer.current) clearTimeout(smartTimer.current);
       smartTimer.current = setTimeout(() => {
         setLines(prev => {
@@ -357,22 +373,25 @@ export const useSmartBoard = () => {
           const start = { x: pts[0], y: pts[1] };
           const end = { x: pts[pts.length - 2], y: pts[pts.length - 1] };
           
+          // 거리 계산
           const dist = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
           let totalLen = 0;
           for(let i=0; i<pts.length-2; i+=2) totalLen += Math.sqrt(Math.pow(pts[i+2]-pts[i], 2) + Math.pow(pts[i+3]-pts[i+1], 2));
 
+          // B. 직선 또는 부드러운 곡선 (직선도: 직선 거리 / 전체 길이)
           const straightness = dist / totalLen;
-          const newTool = straightness > 0.98 ? 'line_straight' : 'smart_curve'; 
+          const newTool = straightness > 0.98 ? 'line_straight' : 'smart_curve'; // 기준을 0.98로 높여 곡선 인식률 향상
           
           let newPoints = pts;
           if (newTool === 'smart_curve') {
+            // RDP 알고리즘으로 곡선의 특징점만 남기고 최적화 (허용 오차 2.0)
             newPoints = simplifyPoints(pts, 2.0);
           }
 
           const newLine = { ...lastLine, tool: newTool, tension: newTool === 'smart_curve' ? 0.5 : 0, points: newTool === 'line_straight' ? [start.x, start.y, end.x, end.y] : newPoints };
           return [...prev.slice(0, -1), newLine];
         });
-        isSmartShapeFixed.current = true; 
+        isSmartShapeFixed.current = true; // 변환 완료 플래그
       }, 600);
       return;
     }
@@ -397,6 +416,7 @@ export const useSmartBoard = () => {
           { tool: 'rect', x: -huge, y: y, width: huge + x, height: height, fill: bgColor },
           { tool: 'rect', x: x + width, y: y, width: huge, height: height, fill: bgColor }
         ];
+        // 마스킹 적용 및 기록 저장
         const newLines = [...linesRef.current, ...maskRects];
         setLines(newLines);
         addToHistory(newLines);
@@ -416,10 +436,12 @@ export const useSmartBoard = () => {
 
     if (isDrawing.current) {
       isDrawing.current = false;
+      // 획이 끝났으므로 현재 상태를 기록에 저장
       addToHistory(linesRef.current);
     }
   }, [tool, currentCrop, bgColor, addToHistory, activePen]);
 
+  // --- 화면 줌/드래그 로직 ---
   const handleWheel = useCallback((e) => {
     e.evt.preventDefault();
     const stage = stageRef.current;
@@ -536,13 +558,16 @@ export const useSmartBoard = () => {
     }
   }, []);
 
+  // 전체 삭제 핸들러
   const handleClearAll = useCallback(() => {
+    // 마스킹(rect)은 유지하고 나머지 판서만 삭제
     const maskLines = linesRef.current.filter(line => line.tool === 'rect');
     setLines(maskLines);
     if (smartTimer.current) clearTimeout(smartTimer.current);
-    addToHistory(maskLines); 
+    addToHistory(maskLines); // 마스크만 남은 상태를 기록에 추가
   }, [addToHistory]);
 
+  // UI 컴포넌트로 전달할 모든 데이터와 함수를 반환
   return {
     pdfFile, pdfImage, lines, tool, setTool, pens, activePenId, setActivePenId,
     stageScale, stagePos, setStagePos, bgColor, currentCrop, isFullScreen,
@@ -552,7 +577,7 @@ export const useSmartBoard = () => {
     handleMouseDown, handleMouseMove, handleMouseUp,
     handleTouchStart, handleTouchMove, handleTouchEnd,
     handleWheel, handleZoomChange, handleResetZoom, hasMask, handleCropTool, 
-    handleClearAll, loadPdf, // loadPdf 내보내기 추가
+    handleClearAll,
     undo, redo, canUndo: historyStep > 0, canRedo: historyStep < history.length - 1
   };
 };
