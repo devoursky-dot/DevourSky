@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import SmartBoardApp from './apps/SmartBoard_app';
+import dragonImage from './assets/devoursky.svg';
+import { Home, Menu, Maximize, Minimize } from 'lucide-react';
 
 // 유명한 우주 배경 효과 (Starfield / Galaxy Warp)
 const GalaxyBackground = () => {
@@ -72,7 +74,7 @@ const GalaxyBackground = () => {
 // 용의 각 부위를 렌더링하는 컴포넌트
 const DragonPart = ({ clipPath, origin, animate, transition, zIndex }) => (
   <motion.img
-    src="/src/assets/devoursky.svg"
+    src={dragonImage}
     alt="Devoursky Dragon Part"
     style={{
       position: 'absolute',
@@ -94,17 +96,127 @@ const DragonPart = ({ clipPath, origin, animate, transition, zIndex }) => (
 const DevourskyWhiteLineBackground = () => {
   const [showSmartBoard, setShowSmartBoard] = useState(false);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
+    const handleFullScreenChange = () => setIsFullScreen(!!document.fullscreenElement);
+
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    document.addEventListener('fullscreenchange', handleFullScreenChange);
+
+    // 홈 화면 진입 시 전체화면 시도 (브라우저 정책에 따라 차단될 수 있음)
+    document.documentElement.requestFullscreen().catch(() => {});
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      document.removeEventListener('fullscreenchange', handleFullScreenChange);
+    };
   }, []);
 
   const isMobile = windowWidth < 768;
 
   if (showSmartBoard) {
-    return <SmartBoardApp />;
+    return (
+      <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
+        <SmartBoardApp />
+        {/* 우측 상단 메뉴 버튼 (드롭다운) */}
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          zIndex: 100,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end'
+        }}>
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            style={{
+              background: 'rgba(0, 0, 0, 0.8)',
+              border: 'none',
+              borderBottomLeftRadius: isMenuOpen ? '0' : '15px',
+              padding: '12px',
+              cursor: 'pointer',
+              backdropFilter: 'blur(4px)',
+              color: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'border-radius 0.2s'
+            }}
+            title="Menu"
+          >
+            <Menu size={24} />
+          </button>
+          
+          {isMenuOpen && (
+            <div style={{
+              background: 'rgba(0, 0, 0, 0.8)',
+              backdropFilter: 'blur(4px)',
+              borderBottomLeftRadius: '15px',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              minWidth: '140px'
+            }}>
+              <button
+                onClick={() => {
+                  if (!document.fullscreenElement) {
+                    document.documentElement.requestFullscreen().catch(e => console.log(e));
+                  } else {
+                    if (document.exitFullscreen) document.exitFullscreen().catch(e => console.log(e));
+                  }
+                  setIsMenuOpen(false);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: '12px 16px',
+                  color: 'white',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  fontSize: '14px',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+                  width: '100%'
+                }}
+              >
+                {isFullScreen ? (
+                  <><Minimize size={18} /> Exit Fullscreen</>
+                ) : (
+                  <><Maximize size={18} /> Fullscreen</>
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  setShowSmartBoard(false);
+                  setIsMenuOpen(false);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: '12px 16px',
+                  color: 'white',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  fontSize: '14px',
+                  width: '100%'
+                }}
+              >
+                <Home size={18} /> Home
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -118,6 +230,49 @@ const DevourskyWhiteLineBackground = () => {
       alignItems: 'center',
       overflow: 'hidden' 
     }}>
+      {/* 상단 메뉴바 */}
+      <div style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        padding: '15px 20px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        zIndex: 30,
+        boxSizing: 'border-box',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.8)'
+      }}>
+        <div style={{ 
+          color: 'white', 
+          fontSize: '20px', 
+          fontWeight: 'bold', 
+          letterSpacing: '2px',
+          textShadow: '0 0 10px rgba(255,255,255,0.5)'
+        }}>
+          DevourSky
+        </div>
+        <button
+          onClick={() => setShowSmartBoard(true)}
+          style={{
+            background: 'rgba(255, 255, 255, 0.1)',
+            border: '1px solid rgba(255, 255, 255, 0.3)',
+            borderRadius: '20px',
+            padding: '8px 20px',
+            color: 'white',
+            fontSize: '14px',
+            cursor: 'pointer',
+            backdropFilter: 'blur(4px)',
+            transition: 'all 0.3s ease'
+          }}
+          onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
+          onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
+        >
+          Smart Board
+        </button>
+      </div>
+
       {/* 1. 우주 별 배경 (Canvas Galaxy) */}
       <GalaxyBackground />
 
@@ -164,7 +319,7 @@ const DevourskyWhiteLineBackground = () => {
         onClick={() => setShowSmartBoard(true)}
         style={{
           position: 'absolute',
-          bottom: isMobile ? '30px' : '50px',
+          bottom: isMobile ? '80px' : '50px',
           zIndex: 20,
           background: 'rgba(255, 255, 255, 0.05)',
           border: '1px solid rgba(255, 255, 255, 0.2)',
