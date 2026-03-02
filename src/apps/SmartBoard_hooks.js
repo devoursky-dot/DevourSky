@@ -9,6 +9,15 @@ export const colorPalette = [
   '#008080', '#000080', '#808000', '#800000', '#FF00FF'
 ];
 
+// --- [설정] 속도 기반 필압 상수 ---
+const VELOCITY_PARAMS = {
+  minSpeed: 0.5,       // 이 속도 이하면 최대 굵기
+  maxSpeed: 5.0,       // 이 속도 이상이면 최소 굵기
+  minWidthRatio: 0.2,  // 최소 굵기 = 기본 굵기 * 0.2
+  maxWidthRatio: 1.2,  // 최대 굵기 = 기본 굵기 * 1.2
+  smoothing: 0.5       // 보정 계수 (0~1, 클수록 부드럽지만 반응 느림)
+};
+
 // --- 헬퍼 함수 ---
 const getRelativePointerPosition = (stage) => {
   const transform = stage.getAbsoluteTransform().copy().invert();
@@ -103,6 +112,9 @@ export const useSmartBoard = () => {
   const linesRef = useRef(lines);
   const smartTimer = useRef(null); // 스마트 펜 타이머
   const isSmartShapeFixed = useRef(false); // 도형 변환 완료 여부
+  
+  // [추가] 필압 계산을 위한 이전 상태 저장 (시간, 좌표, 속도, 굵기)
+  const lastPressureRef = useRef({ time: 0, x: 0, y: 0, velocity: 0, width: 0 });
 
   const activePen = pens[activePenId];
 
@@ -169,15 +181,17 @@ export const useSmartBoard = () => {
   }, []);
 
   const changePage = useCallback((pageNumber) => {
+    if (pageNumber !== currPage) {
+      setPdfImage(null);
+    }
     setCurrPage(pageNumber);
     setShowPageSelector(false);
-    setPdfImage(null);
     setLines([]);
     setHistory([[]]); // 페이지 변경 시 기록 초기화
     setHistoryStep(0);
     setStageScale(1);
     setStagePos({ x: 0, y: 0 });
-  }, []);
+  }, [currPage]);
 
   const handlePrevPage = useCallback(() => {
     if (currPage > 1) changePage(currPage - 1);
@@ -244,13 +258,27 @@ export const useSmartBoard = () => {
     }
 
     isDrawing.current = true;
+    
+    // [수정] 필압 펜 초기화 로직 추가
+    if (tool === 'pen' && activePen.type === 'pressure') {
+      lastPressureRef.current = {
+        time: Date.now(),
+        x: pos.x,
+        y: pos.y,
+        velocity: 0,
+        width: activePen.width
+      };
+    }
+
     let newLine = { 
       tool, 
       points: [pos.x, pos.y], 
       color: tool === 'eraser' ? 'white' : activePen.color,
       strokeWidth: tool === 'eraser' ? 30 : activePen.width,
       opacity: tool === 'pen' && activePen.type === 'highlighter' ? 0.4 : 1,
-      penType: tool === 'pen' ? activePen.type : 'basic'
+      penType: tool === 'pen' ? activePen.type : 'basic',
+      // [추가] 필압 펜일 경우 굵기 배열 초기화
+      widths: (tool === 'pen' && activePen.type === 'pressure') ? [activePen.width] : undefined
     };
 
     setLines(prev => [...prev, newLine]);
@@ -269,6 +297,55 @@ export const useSmartBoard = () => {
         width: Math.abs(point.x - prev.startX),
         height: Math.abs(point.y - prev.startY)
       }));
+      return;
+    }
+
+    // [추가] 속도 기반 필압 계산 로직
+    if (tool === 'pen' && activePen.type === 'pressure' && isDrawing.current) {
+      const now = Date.now();
+      const last = lastPressureRef.current;
+      const dist = Math.sqrt(Math.pow(point.x - last.x, 2) + Math.pow(point.y - last.y, 2));
+
+      // 1. 스로틀링: 이동 거리가 너무 작으면(2px 미만) 계산 건너뜀 (스마트폰 떨림 방지)
+      // 단, 시간이 너무 오래 지났으면(50ms) 강제로 업데이트
+      if (dist < 2 && (now - last.time) < 50) return;
+
+      const dt = Math.max(1, now - last.time); // 0 나누기 방지
+      const currVelocity = dist / dt;
+
+      // 2. 속도 스무딩 (이동 평균): 급격한 변화 방지
+      const velocity = last.velocity * VELOCITY_PARAMS.smoothing + currVelocity * (1 - VELOCITY_PARAMS.smoothing);
+
+      // 3. 속도 -> 굵기 변환 (반비례 관계)
+      const { minSpeed, maxSpeed, minWidthRatio, maxWidthRatio } = VELOCITY_PARAMS;
+      // 속도를 범위 내로 클램핑
+      const clampedVel = Math.max(minSpeed, Math.min(velocity, maxSpeed));
+      // 0.0 ~ 1.0 사이 비율로 변환
+      const ratio = (clampedVel - minSpeed) / (maxSpeed - minSpeed);
+      
+      const baseWidth = activePen.width;
+      const minW = baseWidth * minWidthRatio;
+      const maxW = baseWidth * maxWidthRatio;
+      
+      // 속도가 빠를수록(ratio가 1에 가까울수록) 얇게(minW)
+      const targetWidth = maxW - ratio * (maxW - minW);
+
+      // 4. 굵기 스무딩: 굵기도 급격하게 변하지 않도록 보정
+      const width = last.width * VELOCITY_PARAMS.smoothing + targetWidth * (1 - VELOCITY_PARAMS.smoothing);
+
+      // 상태 업데이트
+      lastPressureRef.current = { time: now, x: point.x, y: point.y, velocity, width };
+
+      setLines(prev => {
+        const lastLine = { ...prev[prev.length - 1] };
+        // 포인트 추가
+        lastLine.points = lastLine.points.concat([point.x, point.y]);
+        // 굵기 추가 (배열이 없으면 생성)
+        if (!lastLine.widths) lastLine.widths = [baseWidth];
+        lastLine.widths = lastLine.widths.concat([width]);
+        
+        return [...prev.slice(0, -1), lastLine];
+      });
       return;
     }
 

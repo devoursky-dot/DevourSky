@@ -1,13 +1,67 @@
 // SmartBoard_app.jsx
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Stage, Layer, Image, Rect, Line, Ellipse, Path } from 'react-konva';
+import { Stage, Layer, Image, Rect, Line, Ellipse, Path, Shape } from 'react-konva';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { FileUp, Hand, Pencil, Eraser, RotateCcw, Crop, Maximize, Minimize, Highlighter, PenTool, LayoutGrid, ChevronLeft, ChevronRight, Trash2, Undo, Redo, Sparkles } from 'lucide-react';
 import { useSmartBoard, colorPalette } from './SmartBoard_hooks'; // 만들어둔 훅 임포트
 
 // 최신 라이브러리 환경에 맞는 워커 설정
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+
+// --- [추가] 필압 펜 렌더링 컴포넌트 ---
+const PressureLine = ({ points, widths, color }) => (
+  <Shape
+    sceneFunc={(ctx, shape) => {
+      if (!points || points.length < 4 || !widths) return;
+      
+      ctx.beginPath();
+      // 각 세그먼트마다 사다리꼴 형태로 연결하여 가변 굵기 표현
+      for (let i = 0; i < points.length - 2; i += 2) {
+        const x1 = points[i], y1 = points[i+1];
+        const x2 = points[i+2], y2 = points[i+3];
+        
+        // 현재 점과 다음 점의 굵기 (없으면 이전 굵기 유지)
+        const w1 = widths[i/2] || widths[0];
+        const w2 = widths[i/2+1] || w1;
+        
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        const sin = Math.sin(angle);
+        const cos = Math.cos(angle);
+        
+        // 세그먼트의 네 모서리 좌표 계산 (법선 벡터 방향으로 굵기만큼 이동)
+        const p1l_x = x1 + sin * w1 / 2;
+        const p1l_y = y1 - cos * w1 / 2;
+        const p1r_x = x1 - sin * w1 / 2;
+        const p1r_y = y1 + cos * w1 / 2;
+        
+        const p2l_x = x2 + sin * w2 / 2;
+        const p2l_y = y2 - cos * w2 / 2;
+        const p2r_x = x2 - sin * w2 / 2;
+        const p2r_y = y2 + cos * w2 / 2;
+        
+        // 사다리꼴 그리기
+        ctx.moveTo(p1l_x, p1l_y);
+        ctx.lineTo(p2l_x, p2l_y);
+        ctx.lineTo(p2r_x, p2r_y);
+        ctx.lineTo(p1r_x, p1r_y);
+        
+        // 연결 부위를 부드럽게 하기 위해 원 그리기
+        ctx.moveTo(x1 + w1/2, y1);
+        ctx.arc(x1, y1, w1/2, 0, Math.PI * 2);
+      }
+      
+      // 마지막 점 마감
+      const lastI = points.length - 2;
+      const lastW = widths[widths.length - 1] || widths[0];
+      ctx.moveTo(points[lastI] + lastW/2, points[lastI+1]);
+      ctx.arc(points[lastI], points[lastI+1], lastW/2, 0, Math.PI * 2);
+      
+      ctx.fillStyle = color;
+      ctx.fill();
+    }}
+  />
+);
 
 // --- [UI 전용 컴포넌트] 플로팅 툴바 ---
 const FloatingToolbar = React.memo(({ 
@@ -24,7 +78,6 @@ const FloatingToolbar = React.memo(({
   // 툴바 내부의 UI 상태 (팝업 열림/닫힘 등)는 툴바 스스로 관리합니다.
   const [penSettingsPos, setPenSettingsPos] = useState({ top: 0, left: 0 });
   const [sliderPos, setSliderPos] = useState({ top: 0, left: 0 });
-  const [showClearConfirm, setShowClearConfirm] = useState(false); // 삭제 확인 팝업 상태
 
   const toolbarRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -32,7 +85,6 @@ const FloatingToolbar = React.memo(({
   const sliderRef = useRef(null);
   const penBtnRefs = useRef([]);
   const penSettingsRef = useRef(null);
-  const clearConfirmRef = useRef(null); // 삭제 팝업 참조
 
   const stopPropagation = (e) => e.stopPropagation();
 
@@ -62,13 +114,10 @@ const FloatingToolbar = React.memo(({
           !penBtnRefs.current.some(ref => ref && ref.contains(event.target))) {
         setShowPenSettings(false);
       }
-      if (showClearConfirm && clearConfirmRef.current && !clearConfirmRef.current.contains(event.target)) {
-        setShowClearConfirm(false);
-      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showZoomSlider, showPenSettings, activePenId, showClearConfirm]);
+  }, [showZoomSlider, showPenSettings, activePenId]);
 
   // 반응형 스타일 적용
   const currentBtnStyle = isMobile ? { ...btnStyle, padding: '6px' } : btnStyle;
@@ -151,29 +200,7 @@ const FloatingToolbar = React.memo(({
 
         <button onClick={() => setTool('eraser')} style={tool === 'eraser' ? currentActiveBtn : currentBtnStyle}><Eraser size={iconSize}/></button>
         
-        {/* 전체 삭제 버튼 및 팝업 */}
-        <div style={{ position: 'relative' }} ref={clearConfirmRef}>
-          {showClearConfirm && (
-            <div style={{
-              position: 'absolute', bottom: '120%', left: '50%', transform: 'translateX(-50%)',
-              marginBottom: '8px', background: 'white', padding: '12px', borderRadius: '8px',
-              boxShadow: '0 4px 15px rgba(0,0,0,0.15)', zIndex: 20, minWidth: '180px', textAlign: 'center',
-              border: '1px solid #eee'
-            }}>
-              <div style={{ marginBottom: '10px', fontSize: '13px', fontWeight: '600', color: '#333' }}>모두 지우시겠습니까?</div>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                <button onClick={() => { onClearAll(); setShowClearConfirm(false); }} style={{ padding: '6px 12px', borderRadius: '4px', background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>예</button>
-                <button onClick={() => setShowClearConfirm(false)} style={{ padding: '6px 12px', borderRadius: '4px', background: '#f3f4f6', color: '#374151', border: 'none', cursor: 'pointer', fontSize: '12px' }}>아니오</button>
-              </div>
-              {/* 말풍선 화살표 */}
-              <div style={{ 
-                position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', 
-                borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '6px solid white' 
-              }} />
-            </div>
-          )}
-          <button onClick={() => setShowClearConfirm(!showClearConfirm)} style={currentBtnStyle} title="전체 삭제"><Trash2 size={iconSize}/></button>
-        </div>
+        <button onClick={onClearAll} style={currentBtnStyle} title="전체 삭제"><Trash2 size={iconSize}/></button>
 
         <button onClick={handleCropTool} style={(tool === 'crop' || hasMask) ? currentActiveBtn : currentBtnStyle} title={hasMask ? "마스킹 해제" : "영역 잘라내기"}><Crop size={iconSize}/></button>
       </div>
@@ -310,9 +337,14 @@ const SmartBoardApp = () => {
               />
             ) : null)}
 
-            {/* 선/곡선 렌더링 */}
+            {/* [추가] 필압 펜 렌더링 */}
+            {board.lines.map((line, i) => line.penType === 'pressure' ? (
+              <PressureLine key={i} points={line.points} widths={line.widths} color={line.color} />
+            ) : null)}
+
+            {/* 선/곡선 렌더링 (필압 펜 제외) */}
             {board.lines.map((line, i) => {
-              if (line.tool !== 'rect' && line.tool !== 'ellipse' && line.tool !== 'smart_path') {
+              if (line.tool !== 'rect' && line.tool !== 'ellipse' && line.tool !== 'smart_path' && line.penType !== 'pressure') {
                 return (
                   <Line
                     key={i} points={line.points} stroke={line.color} strokeWidth={line.strokeWidth}
