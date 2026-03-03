@@ -5,14 +5,9 @@ import { Stage, Layer, Image, Rect, Line, Ellipse, Path, Shape } from 'react-kon
 import { Document, Page, pdfjs } from 'react-pdf';
 import { FileUp, Hand, Pencil, Eraser, RotateCcw, Crop, Maximize, Minimize, Highlighter, PenTool, LayoutGrid, ChevronLeft, ChevronRight, Trash2, Undo, Redo, Sparkles, Folder, X } from 'lucide-react';
 import { useSmartBoard, colorPalette } from './SmartBoard_hooks'; 
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url&update=1';
 
-try {
-  if (typeof pdfjs !== 'undefined' && pdfjs.version) {
-    pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
-  }
-} catch (e) {
-  console.warn("PDF Worker setup failed:", e);
-}
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 // --- [설정] 구글 드라이브 API 및 폴더 설정 ---
 const GOOGLE_API_KEY = 'AIzaSyCiVnPpyg9xkhkiacbFmkE05tjy4Z7omko'; 
@@ -456,7 +451,7 @@ const SmartBoardApp = () => {
     <>
       <div style={{ display: 'none' }}>
         {board.pdfFile && (
-          <Document file={board.pdfFile} onLoadSuccess={board.onDocumentLoadSuccess}>
+          <Document file={board.pdfFile} onLoadSuccess={board.onDocumentLoadSuccess} onLoadError={(error) => console.error("PDF Load Error:", error)}>
             <Page pageNumber={board.currPage} onRenderSuccess={board.onRenderSuccess} width={dimensions.width} renderTextLayer={false} renderAnnotationLayer={false} />
           </Document>
         )}
