@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import SmartBoardApp from './apps/SmartBoard_app';
+import PenQR from './apps/PenQR';
+import PenQR_SP from './apps/PenQR_SP';
 import dragonImage from './assets/devoursky.svg';
-import { Home, Menu, Maximize, Minimize } from 'lucide-react';
+import { Home, Menu, Maximize, Minimize, Info, X, Cpu, MemoryStick, Fingerprint, Monitor, Activity, QrCode } from 'lucide-react';
 
 // 유명한 우주 배경 효과 (Starfield / Galaxy Warp)
 const GalaxyBackground = () => {
@@ -98,6 +100,9 @@ const DevourskyWhiteLineBackground = () => {
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [showSysInfo, setShowSysInfo] = useState(false);
+  const [showPenQR, setShowPenQR] = useState(false);
+  const [systemData, setSystemData] = useState(null);
 
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
@@ -115,7 +120,43 @@ const DevourskyWhiteLineBackground = () => {
     };
   }, []);
 
+  const handleSystemCheck = () => {
+    const info = {
+      cpu: navigator.hardwareConcurrency ? `${navigator.hardwareConcurrency} Logical Cores` : 'Unknown',
+      ram: navigator.deviceMemory ? `~${navigator.deviceMemory} GiB` : 'Unknown / Restricted',
+      touch: navigator.maxTouchPoints > 0 
+        ? `Supported (${navigator.maxTouchPoints} Points)` 
+        : 'Not Supported',
+      userAgent: navigator.userAgent,
+      gpu: 'Unknown',
+      resolution: `${window.screen.width} x ${window.screen.height}`,
+      pixelRatio: window.devicePixelRatio || 1
+    };
+
+    // GPU 정보 (Chipset 추정용)
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (gl) {
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+          info.gpu = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+        }
+      }
+    } catch (e) {
+      console.error("WebGL Info Error", e);
+    }
+
+    setSystemData(info);
+    setShowSysInfo(true);
+  };
+
   const isMobile = windowWidth < 768;
+
+  // [FIX] 학생 페이지 라우팅 (QR코드 스캔 시 접속)
+  if (window.location.pathname === '/student') {
+    return <PenQR_SP />;
+  }
 
   if (showSmartBoard) {
     return (
@@ -219,6 +260,27 @@ const DevourskyWhiteLineBackground = () => {
     );
   }
 
+  if (showPenQR) {
+    return (
+      <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
+        <PenQR />
+        <button
+          onClick={() => setShowPenQR(false)}
+          style={{
+            position: 'absolute', top: '20px', right: '20px', zIndex: 100,
+            background: 'rgba(0,0,0,0.6)', color: 'white', border: 'none',
+            borderRadius: '50%', width: '40px', height: '40px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', backdropFilter: 'blur(4px)'
+          }}
+          title="Home"
+        >
+          <Home size={20} />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div style={{ 
       backgroundColor: 'black', 
@@ -253,24 +315,66 @@ const DevourskyWhiteLineBackground = () => {
         }}>
           DevourSky
         </div>
-        <button
-          onClick={() => setShowSmartBoard(true)}
-          style={{
-            background: 'rgba(255, 255, 255, 0.1)',
-            border: '1px solid rgba(255, 255, 255, 0.3)',
-            borderRadius: '20px',
-            padding: '8px 20px',
-            color: 'white',
-            fontSize: '14px',
-            cursor: 'pointer',
-            backdropFilter: 'blur(4px)',
-            transition: 'all 0.3s ease'
-          }}
-          onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
-          onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
-        >
-          Smart Board
-        </button>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            onClick={handleSystemCheck}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'rgba(255, 255, 255, 0.7)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              fontSize: '12px'
+            }}
+            title="System Info"
+          >
+            <Info size={18} /> <span style={{ display: isMobile ? 'none' : 'inline' }}>Sys Info</span>
+          </button>
+
+          <button
+            onClick={() => setShowPenQR(true)}
+            style={{
+              background: 'rgba(255, 255, 255, 0.1)',
+              border: '1px solid rgba(255, 255, 255, 0.3)',
+              borderRadius: '20px',
+              padding: '8px 15px',
+              color: 'white',
+              fontSize: '14px',
+              cursor: 'pointer',
+              backdropFilter: 'blur(4px)',
+              transition: 'all 0.3s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
+            onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
+          >
+            <QrCode size={16} /> <span style={{ display: isMobile ? 'none' : 'inline' }}>Pen QR</span>
+          </button>
+
+          <button
+            onClick={() => setShowSmartBoard(true)}
+            style={{
+              background: 'rgba(255, 255, 255, 0.1)',
+              border: '1px solid rgba(255, 255, 255, 0.3)',
+              borderRadius: '20px',
+              padding: '8px 20px',
+              color: 'white',
+              fontSize: '14px',
+              cursor: 'pointer',
+              backdropFilter: 'blur(4px)',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
+            onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
+          >
+            Smart Board
+          </button>
+        </div>
       </div>
 
       {/* 1. 우주 별 배경 (Canvas Galaxy) */}
@@ -346,8 +450,68 @@ const DevourskyWhiteLineBackground = () => {
       >
         ENTER SMART BOARD
       </button>
+
+      {/* 시스템 정보 팝업 */}
+      {showSysInfo && systemData && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+          backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 200,
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          backdropFilter: 'blur(5px)'
+        }} onClick={() => setShowSysInfo(false)}>
+          <div style={{
+            width: '90%', maxWidth: '500px',
+            backgroundColor: 'rgba(20, 20, 30, 0.95)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            borderRadius: '16px', padding: '24px',
+            color: 'white', boxShadow: '0 0 30px rgba(0, 150, 255, 0.2)',
+            position: 'relative'
+          }} onClick={e => e.stopPropagation()}>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Activity size={20} color="#6366f1" /> System Information
+              </h3>
+              <button onClick={() => setShowSysInfo(false)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gap: '15px' }}>
+              <div style={infoRowStyle}>
+                <div style={infoLabelStyle}><Cpu size={16} /> CPU (Threads)</div>
+                <div style={infoValueStyle}>{systemData.cpu}</div>
+              </div>
+              <div style={infoRowStyle}>
+                <div style={infoLabelStyle}><Monitor size={16} /> GPU / Chipset</div>
+                <div style={infoValueStyle}>{systemData.gpu}</div>
+              </div>
+              <div style={infoRowStyle}>
+                <div style={infoLabelStyle}><MemoryStick size={16} /> RAM (Approx)</div>
+                <div style={infoValueStyle}>{systemData.ram}</div>
+              </div>
+              <div style={infoRowStyle}>
+                <div style={infoLabelStyle}><Fingerprint size={16} /> Touch Sensor</div>
+                <div style={infoValueStyle}>{systemData.touch}</div>
+              </div>
+              <div style={infoRowStyle}>
+                <div style={infoLabelStyle}><Monitor size={16} /> Resolution</div>
+                <div style={infoValueStyle}>{systemData.resolution} (Px Ratio: {systemData.pixelRatio})</div>
+              </div>
+            </div>
+            
+            <div style={{ marginTop: '20px', fontSize: '11px', color: '#666', textAlign: 'center' }}>
+              * 브라우저 보안 정책상 일부 하드웨어 정보는 근사치이거나 숨겨질 수 있습니다.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+const infoRowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' };
+const infoLabelStyle = { display: 'flex', alignItems: 'center', gap: '8px', color: '#aaa', fontSize: '14px' };
+const infoValueStyle = { fontWeight: 'bold', color: '#fff', fontSize: '14px', textAlign: 'right', maxWidth: '60%' };
 
 export default DevourskyWhiteLineBackground;

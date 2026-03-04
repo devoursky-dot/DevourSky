@@ -10,10 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "firebase": "^12.10.0",
     "framer-motion": "^12.34.3",
     "konva": "^10.2.0",
     "lucide-react": "^0.575.0",
     "pdfjs-dist": "^5.4.296",
+    "perfect-freehand": "^1.2.3",
+    "qrcode.react": "^4.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-konva": "^19.2.3",
