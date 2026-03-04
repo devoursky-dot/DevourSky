@@ -108,7 +108,7 @@ const PenQR = () => {
       {/* QR & 응답창 */}
       {showQR && (
         <div style={styles.qrPopup}>
-          <QRCodeCanvas value={`${window.location.origin}/student`} size={150} />
+          <QRCodeCanvas value={`${window.location.origin}${window.location.pathname}#/student`} size={150} />
           <p>QR 스캔 후 답변!</p>
           <button onClick={() => setShowQR(false)}>닫기</button>
         </div>

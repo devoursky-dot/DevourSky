@@ -103,13 +103,17 @@ const DevourskyWhiteLineBackground = () => {
   const [showSysInfo, setShowSysInfo] = useState(false);
   const [showPenQR, setShowPenQR] = useState(false);
   const [systemData, setSystemData] = useState(null);
+  const [hash, setHash] = useState(window.location.hash);
 
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
     const handleFullScreenChange = () => setIsFullScreen(!!document.fullscreenElement);
 
+    const handleHashChange = () => setHash(window.location.hash);
+
     window.addEventListener('resize', handleResize);
     document.addEventListener('fullscreenchange', handleFullScreenChange);
+    window.addEventListener('hashchange', handleHashChange);
 
     // 홈 화면 진입 시 전체화면 시도 (브라우저 정책에 따라 차단될 수 있음)
     document.documentElement.requestFullscreen().catch(() => {});
@@ -117,6 +121,7 @@ const DevourskyWhiteLineBackground = () => {
     return () => {
       window.removeEventListener('resize', handleResize);
       document.removeEventListener('fullscreenchange', handleFullScreenChange);
+      window.removeEventListener('hashchange', handleHashChange);
     };
   }, []);
 
@@ -153,8 +158,8 @@ const DevourskyWhiteLineBackground = () => {
 
   const isMobile = windowWidth < 768;
 
-  // [FIX] 학생 페이지 라우팅 (QR코드 스캔 시 접속)
-  if (window.location.pathname === '/student') {
+  // [FIX] 학생 페이지 라우팅 (QR코드 스캔 시 접속) - Hash Router 사용 (배포 시 404 방지)
+  if (hash === '#/student') {
     return <PenQR_SP />;
   }
 
