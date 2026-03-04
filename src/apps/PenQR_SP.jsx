@@ -1,15 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { getStroke } from 'perfect-freehand';
 
-// [FIX] Firebase가 설치되지 않았을 경우를 대비한 Mock 객체
-// import { db } from './PenQR_conf';
-// import { doc, onSnapshot, collection, addDoc, serverTimestamp } from 'firebase/firestore';
-const db = {};
-const doc = () => {};
-const collection = () => {};
-const addDoc = async () => console.log("AddDoc (Mock): Firebase not installed");
-const serverTimestamp = () => new Date();
-const onSnapshot = (ref, cb) => { cb({ exists: () => false, data: () => ({}) }); return () => {}; };
+import { db } from './PenQR_conf';
+import { doc, onSnapshot, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 // 벡터 렌더링용 유틸
 const getSvgPathFromStroke = (stroke) => {

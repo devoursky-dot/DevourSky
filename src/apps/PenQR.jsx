@@ -3,18 +3,8 @@ import { getStroke } from 'perfect-freehand';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Pencil, Eraser, RotateCcw, Trash2, Share2, MessageSquare, X } from 'lucide-react';
 
-// [FIX] Firebase가 설치되지 않았을 경우를 대비한 Mock 객체
-// import { db } from './PenQR_conf';
-// import { doc, setDoc, collection, onSnapshot, query, orderBy, deleteDoc, getDocs } from 'firebase/firestore';
-const db = {};
-const doc = () => {};
-const collection = () => {};
-const setDoc = async () => console.log("SetDoc (Mock): Firebase not installed");
-const onSnapshot = (q, cb) => { cb({ docs: [] }); return () => {}; };
-const query = () => {};
-const orderBy = () => {};
-const deleteDoc = async () => {};
-const getDocs = async () => ({ docs: [] });
+import { db } from './PenQR_conf';
+import { doc, setDoc, collection, onSnapshot, query, orderBy, deleteDoc, getDocs } from 'firebase/firestore';
 
 // 스플라인 경로 생성 함수
 const getSvgPathFromStroke = (stroke) => {
