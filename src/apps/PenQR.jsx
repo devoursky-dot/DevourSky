@@ -27,7 +27,7 @@ const PenQR = () => {
   const canvasRef = useRef(null);
   const isDrawing = useRef(false);
   const currentPoints = useRef([]);
-  const roomId = "ROOM_01"; // 고정 룸 ID (필요시 가변)
+  const [roomId] = useState(() => Math.random().toString(36).substring(2, 8).toUpperCase()); // 랜덤 룸 ID 생성
 
   // 1. 학생 답변 실시간 수신
   useEffect(() => {
@@ -36,7 +36,7 @@ const PenQR = () => {
       setResponses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
     return () => unsubscribe();
-  }, []);
+  }, [roomId]);
 
   // strokes 상태가 변경되면 ref도 동기화 (Undo/Redo 등 외부 변경 대응)
   useEffect(() => {
@@ -51,6 +51,21 @@ const PenQR = () => {
       updatedAt: new Date()
     });
     setShowQR(true);
+  };
+
+  const handleCloseSession = async () => {
+    if (window.confirm("질문을 종료하시겠습니까? 답변 데이터가 모두 삭제됩니다.")) {
+      setShowQR(false);
+      try {
+        const q = query(collection(db, "rooms", roomId, "answers"));
+        const snapshot = await getDocs(q);
+        const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+        await Promise.all(deletePromises);
+        setResponses([]);
+      } catch (e) {
+        console.error("Error clearing answers:", e);
+      }
+    }
   };
 
   // --- 드로잉 로직 ---
@@ -109,32 +124,44 @@ const PenQR = () => {
       {/* QR & 응답창 */}
       {showQR && (
         <div style={styles.qrPopup}>
-          <QRCodeCanvas value={`${window.location.origin}${window.location.pathname}#/student`} size={150} />
-          <p>QR 스캔 후 답변!</p>
-          <button onClick={() => setShowQR(false)}>닫기</button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 200 }}>
+            <QRCodeCanvas value={`${window.location.origin}${window.location.pathname}#/student?room=${roomId}`} size={160} />
+            <p style={{margin: '15px 0 10px', fontSize: '16px'}}>Room ID: <strong>{roomId}</strong></p>
+            <p style={{margin: '0 0 15px', color: '#666', fontSize: '14px'}}>QR코드를 스캔하여<br/>답변을 입력하세요.</p>
+            <button onClick={handleCloseSession} style={styles.closeBtn}>질문 종료</button>
+          </div>
+          
+          <div style={styles.dividerVertical}></div>
+
+          <div style={styles.resSection}>
+            <h4 style={{margin: '0 0 15px 0', display: 'flex', alignItems: 'center', gap: 8}}><MessageSquare size={18}/> 답변 목록 ({responses.length})</h4>
+            <div style={styles.resList}>
+              {responses.length === 0 ? (
+                <div style={{textAlign: 'center', color: '#999', marginTop: 50}}>아직 답변이 없습니다.</div>
+              ) : (
+                responses.map(r => (
+                  <div key={r.id} style={styles.resItem}><strong>{r.name}</strong>: {r.answer}</div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
-
-      <div style={styles.resPanel}>
-        <h4 style={{margin: '0 0 10px 0'}}><MessageSquare size={16}/> 답변 목록 ({responses.length})</h4>
-        <div style={{overflowY: 'auto', flex: 1}}>
-          {responses.map(r => (
-            <div key={r.id} style={styles.resItem}><strong>{r.name}</strong>: {r.answer}</div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 };
 
 const styles = {
-  toolbar: { position: 'absolute', left: 20, top: 20, display: 'flex', gap: 10, background: '#fff', padding: 10, borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.1)' },
-  btn: { padding: 10, border: 'none', background: 'none', cursor: 'pointer' },
+  toolbar: { position: 'absolute', bottom: 30, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 10, background: '#fff', padding: '10px 20px', borderRadius: 30, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', zIndex: 100 },
+  btn: { padding: 10, border: 'none', background: 'none', cursor: 'pointer', color: '#000' },
   activeBtn: { padding: 10, border: 'none', background: '#ddd', borderRadius: 8, cursor: 'pointer' },
   shareBtn: { display: 'flex', alignItems: 'center', gap: 5, padding: '10px 15px', background: '#007bff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 'bold' },
-  qrPopup: { position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)', background: '#fff', padding: 20, borderRadius: 15, textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' },
-  resPanel: { position: 'absolute', right: 20, top: 20, bottom: 20, width: 250, background: 'rgba(255,255,255,0.9)', padding: 15, borderRadius: 15, display: 'flex', flexDirection: 'column' },
-  resItem: { background: '#fff', padding: 8, borderRadius: 8, marginBottom: 8, fontSize: '14px', border: '1px solid #eee', color: '#000' }
+  qrPopup: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: '#fff', padding: 30, borderRadius: 20, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', display: 'flex', gap: 30, maxHeight: '80vh', maxWidth: '90vw' },
+  resSection: { width: 300, display: 'flex', flexDirection: 'column' },
+  resList: { overflowY: 'auto', flex: 1, paddingRight: 5 },
+  resItem: { background: '#f8f9fa', padding: 12, borderRadius: 8, marginBottom: 10, fontSize: '14px', border: '1px solid #eee', color: '#333' },
+  closeBtn: { padding: '10px 20px', background: '#ff4d4f', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', width: '100%' },
+  dividerVertical: { width: 1, background: '#eee' }
 };
 
 export default PenQR;

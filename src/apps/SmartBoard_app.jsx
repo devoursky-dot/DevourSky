@@ -578,7 +578,7 @@ const SmartBoardApp = () => {
   );
 };
 
-const btnStyle = { padding: '8px', border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', transition: 'all 0.2s' };
+const btnStyle = { padding: '8px', border: '1px solid #ccc', background: '#fff', color: '#000', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', transition: 'all 0.2s' };
 const activeBtn = { ...btnStyle, background: '#eef2ff', border: '1px solid #6366f1', color: '#6366f1' };
 const disabledBtnStyle = { ...btnStyle, opacity: 0.5, cursor: 'not-allowed', background: '#f3f4f6' };
 const dividerHorizontal = { width: '1px', height: '20px', background: '#eee', margin: '0 8px' };

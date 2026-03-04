@@ -21,19 +21,26 @@ const PenQR_SP = () => {
   const [name, setName] = useState('');
   const [answer, setAnswer] = useState('');
   const [sent, setSent] = useState(false);
-  const roomId = "ROOM_01";
+  const [roomId, setRoomId] = useState(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.split('?')[1]);
+    setRoomId(params.get('room'));
+  }, []);
 
   // 1. 선생님 판서 실시간 데이터 수신
   useEffect(() => {
+    if (!roomId) return;
     const unsubscribe = onSnapshot(doc(db, "rooms", roomId), (doc) => {
       if (doc.exists()) {
         setBoardData(JSON.parse(doc.data().strokes || "[]"));
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [roomId]);
 
   const submit = async () => {
+    if (!roomId) return alert("유효하지 않은 방입니다. QR코드를 다시 스캔해주세요.");
     if (!name || !answer) return alert("이름과 답변을 입력하세요!");
     await addDoc(collection(db, "rooms", roomId, "answers"), {
       name, answer, timestamp: serverTimestamp()
