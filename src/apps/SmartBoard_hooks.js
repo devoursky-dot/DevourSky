@@ -210,18 +210,16 @@ export const useSmartBoard = () => {
     canvas.height = viewport.height;
     const ctx = canvas.getContext('2d', { alpha: false });
     
+    // 배경을 흰색으로 채움 (투명 배경 PDF가 검게 나오는 문제 방지)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
     await page.render({ canvasContext: ctx, viewport, intent: 'display' }).promise;
     
     setBgColor('#ffffff'); // 항상 깨끗한 흰색 배경으로 고정
 
-    try {
-      const bitmap = await createImageBitmap(canvas);
-      setPdfImage(bitmap);
-    } catch (e) {
-      const img = new window.Image();
-      img.src = canvas.toDataURL('image/jpeg', 0.8);
-      img.onload = () => setPdfImage(img);
-    }
+    // Canvas 객체를 직접 이미지 소스로 사용 (변환 과정 생략으로 안정성 확보)
+    setPdfImage(canvas);
   }, []);
 
   const handleMouseDown = useCallback((e) => {

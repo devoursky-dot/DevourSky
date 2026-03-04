@@ -20,6 +20,7 @@ const getSvgPathFromStroke = (stroke) => {
 
 const PenQR = () => {
   const [strokes, setStrokes] = useState([]);
+  const strokesRef = useRef([]); // 그리기 데이터의 즉각적인 참조를 위한 Ref
   const [tool, setTool] = useState('pen');
   const [showQR, setShowQR] = useState(false);
   const [responses, setResponses] = useState([]);
@@ -37,6 +38,12 @@ const PenQR = () => {
     return () => unsubscribe();
   }, []);
 
+  // strokes 상태가 변경되면 ref도 동기화 (Undo/Redo 등 외부 변경 대응)
+  useEffect(() => {
+    strokesRef.current = strokes;
+    draw();
+  }, [strokes]);
+
   // 2. 판서 데이터 Firebase 업로드 (공유 버튼 클릭 시)
   const shareBoard = async () => {
     await setDoc(doc(db, "rooms", roomId), {
@@ -50,14 +57,15 @@ const PenQR = () => {
   const draw = useCallback(() => {
     const ctx = canvasRef.current.getContext('2d');
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-    [...strokes, { points: currentPoints.current, tool }].forEach(s => {
+    // strokes 상태 대신 strokesRef를 사용하여 깜빡임 방지
+    [...strokesRef.current, { points: currentPoints.current, tool }].forEach(s => {
       if (!s.points.length) return;
       const outline = getStroke(s.points, { size: s.tool === 'eraser' ? 25 : 5 });
       const path = new Path2D(getSvgPathFromStroke(outline));
       ctx.fillStyle = s.tool === 'eraser' ? '#fff' : '#000';
       ctx.fill(path);
     });
-  }, [strokes, tool]);
+  }, [tool]); // strokes 의존성 제거 (Ref 사용)
 
   const onPointerDown = (e) => {
     isDrawing.current = true;
@@ -73,14 +81,17 @@ const PenQR = () => {
 
   const onPointerUp = () => {
     isDrawing.current = false;
-    setStrokes(prev => [...prev, { points: [...currentPoints.current], tool }]);
+    // [FIX] 상태 업데이트 전에 현재 포인트를 복사해야 함 (비동기 처리 시점 문제 해결)
+    const newPoints = [...currentPoints.current];
+    if (newPoints.length > 0) {
+      const newStroke = { points: newPoints, tool };
+      strokesRef.current = [...strokesRef.current, newStroke]; // Ref 즉시 업데이트로 공백 제거
+      setStrokes(prev => [...prev, newStroke]);
+    }
     currentPoints.current = [];
+    draw(); // 즉시 다시 그려서 화면 유지
   };
 
-  // [FIX] 화면이 리렌더링되거나(창크기 조절 등) 스트로크가 업데이트되면 캔버스를 다시 그립니다.
-  useEffect(() => {
-    draw();
-  });
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', background: '#eee' }}>
@@ -123,7 +134,7 @@ const styles = {
   shareBtn: { display: 'flex', alignItems: 'center', gap: 5, padding: '10px 15px', background: '#007bff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 'bold' },
   qrPopup: { position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)', background: '#fff', padding: 20, borderRadius: 15, textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' },
   resPanel: { position: 'absolute', right: 20, top: 20, bottom: 20, width: 250, background: 'rgba(255,255,255,0.9)', padding: 15, borderRadius: 15, display: 'flex', flexDirection: 'column' },
-  resItem: { background: '#fff', padding: 8, borderRadius: 8, marginBottom: 8, fontSize: '14px', border: '1px solid #eee' }
+  resItem: { background: '#fff', padding: 8, borderRadius: 8, marginBottom: 8, fontSize: '14px', border: '1px solid #eee', color: '#000' }
 };
 
 export default PenQR;
