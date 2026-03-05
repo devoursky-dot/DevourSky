@@ -58,7 +58,7 @@ const PenQR_SP = () => {
   };
 
   return (
-    <div style={{ padding: 20, maxWidth: 500, margin: '0 auto', fontFamily: 'sans-serif' }}>
+    <div style={{ padding: 20, maxWidth: 500, margin: '0 auto', fontFamily: 'sans-serif', backgroundColor: '#fff', minHeight: '100vh', boxSizing: 'border-box', color: '#333' }}>
       <h2 style={{ textAlign: 'center' }}>PenQR 참여</h2>
       
       {/* 선생님 판서 보기 (벡터 렌더링) */}
