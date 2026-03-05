@@ -56,6 +56,8 @@ const PenQR = () => {
 
     await setDoc(doc(db, "rooms", roomId), {
       strokes: JSON.stringify(strokes),
+      width: canvasRef.current ? canvasRef.current.width : window.innerWidth,
+      height: canvasRef.current ? canvasRef.current.height : window.innerHeight,
       updatedAt: new Date()
     });
     setShowQR(true);
@@ -169,7 +171,7 @@ const PenQR = () => {
           {boardImage && (
             <div style={styles.boardPreview}>
               <div style={{fontSize: '14px', fontWeight: 'bold', color: '#555', marginBottom: '5px'}}>질문 내용</div>
-              <img src={boardImage} alt="판서 내용" style={{width: '100%', height: '100%', objectFit: 'contain', border: '1px solid #eee', borderRadius: '8px'}} />
+              <img src={boardImage} alt="판서 내용" style={{width: '100%', height: 'auto', objectFit: 'contain', border: '1px solid #eee', borderRadius: '8px'}} />
             </div>
           )}
 
@@ -210,7 +212,7 @@ const styles = {
   activeBtn: { padding: 10, border: 'none', background: '#ddd', borderRadius: 8, cursor: 'pointer' },
   shareBtn: { display: 'flex', alignItems: 'center', gap: 5, padding: '10px 15px', background: '#007bff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 'bold' },
   qrPopup: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: '#fff', padding: 25, borderRadius: 20, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', gap: 20, maxHeight: '90vh', maxWidth: '90vw', width: 'auto' },
-  boardPreview: { width: '100%', height: '150px', background: '#f9f9f9', borderRadius: '8px', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  boardPreview: { width: '100%', height: 'auto', minHeight: '200px', maxHeight: '40vh', background: '#f9f9f9', borderRadius: '8px', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   qrContentRow: { display: 'flex', gap: 30, flex: 1, overflow: 'hidden' },
   resSection: { width: 300, display: 'flex', flexDirection: 'column' },
   resList: { overflowY: 'auto', flex: 1, paddingRight: 5 },

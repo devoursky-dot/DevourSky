@@ -18,6 +18,7 @@ const getSvgPathFromStroke = (stroke) => {
 
 const PenQR_SP = () => {
   const [boardData, setBoardData] = useState([]);
+  const [boardSize, setBoardSize] = useState({ width: 1920, height: 1080 });
   const [name, setName] = useState('');
   const [answer, setAnswer] = useState('');
   const [sent, setSent] = useState(false);
@@ -37,7 +38,11 @@ const PenQR_SP = () => {
     if (!roomId) return;
     const unsubscribe = onSnapshot(doc(db, "rooms", roomId), (doc) => {
       if (doc.exists()) {
-        setBoardData(JSON.parse(doc.data().strokes || "[]"));
+        const data = doc.data();
+        setBoardData(JSON.parse(data.strokes || "[]"));
+        if (data.width && data.height) {
+          setBoardSize({ width: data.width, height: data.height });
+        }
       }
     });
     return () => unsubscribe();
@@ -58,7 +63,7 @@ const PenQR_SP = () => {
       
       {/* 선생님 판서 보기 (벡터 렌더링) */}
       <div style={{ background: '#fff', border: '1px solid #ddd', borderRadius: 10, marginBottom: 20, height: 200, overflow: 'hidden' }}>
-        <svg viewBox={`0 0 ${window.innerWidth} ${window.innerHeight}`} style={{ width: '100%', height: '100%' }}>
+        <svg viewBox={`0 0 ${boardSize.width} ${boardSize.height}`} preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: '100%' }}>
           {boardData.map((s, i) => (
             <path key={i} d={getSvgPathFromStroke(getStroke(s.points, { size: s.tool === 'eraser' ? 20 : 5 }))} 
               fill={s.tool === 'eraser' ? '#fff' : '#000'} />
