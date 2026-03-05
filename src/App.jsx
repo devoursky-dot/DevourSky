@@ -392,8 +392,8 @@ const DevourskyWhiteLineBackground = () => {
       {/* 2. 메인 Devoursky 이미지 (아이들 애니메이션 적용) */}
       <motion.div
         style={{ 
-          width: '95%', 
-          height: '95%', 
+          width: '80%', 
+          height: '80%', 
           position: 'absolute', 
           zIndex: 10,
           display: 'flex',
