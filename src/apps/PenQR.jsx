@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { getStroke } from 'perfect-freehand';
 import { QRCodeCanvas } from 'qrcode.react';
-import { Pencil, Eraser, RotateCcw, Trash2, Share2, MessageSquare, X } from 'lucide-react';
+import { Pencil, Eraser, Trash2, Share2, MessageSquare, Undo, Redo } from 'lucide-react';
 
 import { db } from './PenQR_conf';
 import { doc, setDoc, collection, onSnapshot, query, orderBy, deleteDoc, getDocs } from 'firebase/firestore';
@@ -19,11 +19,14 @@ const getSvgPathFromStroke = (stroke) => {
 };
 
 const PenQR = () => {
-  const [strokes, setStrokes] = useState([]);
+  const [history, setHistory] = useState([[]]); // 전체 히스토리 저장
+  const [currentStep, setCurrentStep] = useState(0); // 현재 히스토리 단계
+  const strokes = history[currentStep]; // 현재 보여줄 스트로크
   const strokesRef = useRef([]); // 그리기 데이터의 즉각적인 참조를 위한 Ref
   const [tool, setTool] = useState('pen');
   const [showQR, setShowQR] = useState(false);
   const [responses, setResponses] = useState([]);
+  const [boardImage, setBoardImage] = useState(null); // 캡처된 판서 이미지 저장
   const canvasRef = useRef(null);
   const isDrawing = useRef(false);
   const currentPoints = useRef([]);
@@ -46,6 +49,11 @@ const PenQR = () => {
 
   // 2. 판서 데이터 Firebase 업로드 (공유 버튼 클릭 시)
   const shareBoard = async () => {
+    // 현재 캔버스 내용을 이미지로 캡처
+    if (canvasRef.current) {
+      setBoardImage(canvasRef.current.toDataURL());
+    }
+
     await setDoc(doc(db, "rooms", roomId), {
       strokes: JSON.stringify(strokes),
       updatedAt: new Date()
@@ -100,13 +108,40 @@ const PenQR = () => {
     const newPoints = [...currentPoints.current];
     if (newPoints.length > 0) {
       const newStroke = { points: newPoints, tool };
-      strokesRef.current = [...strokesRef.current, newStroke]; // Ref 즉시 업데이트로 공백 제거
-      setStrokes(prev => [...prev, newStroke]);
+      const newStrokes = [...strokes, newStroke];
+      strokesRef.current = newStrokes; // Ref 즉시 업데이트로 공백 제거
+      
+      const newHistory = history.slice(0, currentStep + 1);
+      newHistory.push(newStrokes);
+      setHistory(newHistory);
+      setCurrentStep(newHistory.length - 1);
     }
     currentPoints.current = [];
     draw(); // 즉시 다시 그려서 화면 유지
   };
 
+  // 실행 취소 (Undo)
+  const handleUndo = () => {
+    if (currentStep > 0) {
+      setCurrentStep(prev => prev - 1);
+    }
+  };
+
+  // 다시 실행 (Redo)
+  const handleRedo = () => {
+    if (currentStep < history.length - 1) {
+      setCurrentStep(prev => prev + 1);
+    }
+  };
+
+  // 전체 삭제
+  const handleClear = () => {
+    if (strokes.length === 0) return;
+    const newHistory = history.slice(0, currentStep + 1);
+    newHistory.push([]); // 빈 배열(삭제된 상태)을 히스토리에 추가
+    setHistory(newHistory);
+    setCurrentStep(newHistory.length - 1);
+  };
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', background: '#eee' }}>
@@ -117,32 +152,49 @@ const PenQR = () => {
       <div style={styles.toolbar}>
         <button onClick={() => setTool('pen')} style={tool === 'pen' ? styles.activeBtn : styles.btn}><Pencil /></button>
         <button onClick={() => setTool('eraser')} style={tool === 'eraser' ? styles.activeBtn : styles.btn}><Eraser /></button>
-        <button onClick={() => setStrokes(prev => prev.slice(0, -1))} style={styles.btn}><RotateCcw /></button>
+        <button onClick={handleClear} style={styles.btn} title="전체 삭제"><Trash2 /></button>
+        
+        <div style={styles.dividerVertical} />
+        
+        <button onClick={handleUndo} disabled={currentStep === 0} style={currentStep === 0 ? styles.disabledBtn : styles.btn}><Undo /></button>
+        <button onClick={handleRedo} disabled={currentStep === history.length - 1} style={currentStep === history.length - 1 ? styles.disabledBtn : styles.btn}><Redo /></button>
+        
         <button onClick={shareBoard} style={styles.shareBtn}><Share2 /> 질문발행</button>
       </div>
 
       {/* QR & 응답창 */}
       {showQR && (
         <div style={styles.qrPopup}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 200 }}>
-            <QRCodeCanvas value={`${window.location.origin}${window.location.pathname}#/student?room=${roomId}`} size={160} />
-            <p style={{margin: '15px 0 10px', fontSize: '16px'}}>Room ID: <strong>{roomId}</strong></p>
-            <p style={{margin: '0 0 15px', color: '#666', fontSize: '14px'}}>QR코드를 스캔하여<br/>답변을 입력하세요.</p>
-            <button onClick={handleCloseSession} style={styles.closeBtn}>질문 종료</button>
-          </div>
-          
-          <div style={styles.dividerVertical}></div>
+          {/* 상단: 판서 내용 미리보기 */}
+          {boardImage && (
+            <div style={styles.boardPreview}>
+              <div style={{fontSize: '14px', fontWeight: 'bold', color: '#555', marginBottom: '5px'}}>질문 내용</div>
+              <img src={boardImage} alt="판서 내용" style={{width: '100%', height: '100%', objectFit: 'contain', border: '1px solid #eee', borderRadius: '8px'}} />
+            </div>
+          )}
 
-          <div style={styles.resSection}>
-            <h4 style={{margin: '0 0 15px 0', display: 'flex', alignItems: 'center', gap: 8}}><MessageSquare size={18}/> 답변 목록 ({responses.length})</h4>
-            <div style={styles.resList}>
-              {responses.length === 0 ? (
-                <div style={{textAlign: 'center', color: '#999', marginTop: 50}}>아직 답변이 없습니다.</div>
-              ) : (
-                responses.map(r => (
-                  <div key={r.id} style={styles.resItem}><strong>{r.name}</strong>: {r.answer}</div>
-                ))
-              )}
+          {/* 하단: QR 코드 및 답변 목록 */}
+          <div style={styles.qrContentRow}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 200 }}>
+              <QRCodeCanvas value={`${window.location.origin}${window.location.pathname.replace(/\/$/, '')}/#/student?room=${roomId}`} size={160} />
+              <p style={{margin: '15px 0 10px', fontSize: '16px'}}>Room ID: <strong>{roomId}</strong></p>
+              <p style={{margin: '0 0 15px', color: '#666', fontSize: '14px'}}>QR코드를 스캔하여<br/>답변을 입력하세요.</p>
+              <button onClick={handleCloseSession} style={styles.closeBtn}>질문 종료</button>
+            </div>
+            
+            <div style={styles.dividerVertical}></div>
+
+            <div style={styles.resSection}>
+              <h4 style={{margin: '0 0 15px 0', display: 'flex', alignItems: 'center', gap: 8}}><MessageSquare size={18}/> 답변 목록 ({responses.length})</h4>
+              <div style={styles.resList}>
+                {responses.length === 0 ? (
+                  <div style={{textAlign: 'center', color: '#999', marginTop: 50}}>아직 답변이 없습니다.</div>
+                ) : (
+                  responses.map(r => (
+                    <div key={r.id} style={styles.resItem}><strong>{r.name}</strong>: {r.answer}</div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -154,9 +206,12 @@ const PenQR = () => {
 const styles = {
   toolbar: { position: 'absolute', bottom: 30, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 10, background: '#fff', padding: '10px 20px', borderRadius: 30, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', zIndex: 100 },
   btn: { padding: 10, border: 'none', background: 'none', cursor: 'pointer', color: '#000' },
+  disabledBtn: { padding: 10, border: 'none', background: 'none', cursor: 'not-allowed', color: '#ccc' },
   activeBtn: { padding: 10, border: 'none', background: '#ddd', borderRadius: 8, cursor: 'pointer' },
   shareBtn: { display: 'flex', alignItems: 'center', gap: 5, padding: '10px 15px', background: '#007bff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 'bold' },
-  qrPopup: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: '#fff', padding: 30, borderRadius: 20, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', display: 'flex', gap: 30, maxHeight: '80vh', maxWidth: '90vw' },
+  qrPopup: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: '#fff', padding: 25, borderRadius: 20, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', gap: 20, maxHeight: '90vh', maxWidth: '90vw', width: 'auto' },
+  boardPreview: { width: '100%', height: '150px', background: '#f9f9f9', borderRadius: '8px', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  qrContentRow: { display: 'flex', gap: 30, flex: 1, overflow: 'hidden' },
   resSection: { width: 300, display: 'flex', flexDirection: 'column' },
   resList: { overflowY: 'auto', flex: 1, paddingRight: 5 },
   resItem: { background: '#f8f9fa', padding: 12, borderRadius: 8, marginBottom: 10, fontSize: '14px', border: '1px solid #eee', color: '#333' },
