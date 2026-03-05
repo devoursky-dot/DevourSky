@@ -163,7 +163,7 @@ const DevourskyWhiteLineBackground = () => {
   const isMobile = windowWidth < 768;
 
   // [FIX] 학생 페이지 라우팅 (QR코드 스캔 시 접속) - Hash Router 사용 (배포 시 404 방지)
-  if (hash === '#/student' || pathname === '/student') {
+  if (hash.startsWith('#/student') || pathname === '/student') {
     return <PenQR_SP />;
   }
 
