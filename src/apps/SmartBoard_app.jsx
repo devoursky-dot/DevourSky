@@ -258,7 +258,7 @@ const FloatingToolbar = React.memo(({
     <div 
       ref={toolbarRef}
       style={{
-        position: 'fixed', bottom: isMobile ? '10px' : '20px', left: '50%', transform: 'translateX(-50%)',
+        position: 'fixed', bottom: isMobile ? '20px' : '50px', left: '50%', transform: 'translateX(-50%)',
         display: 'flex', flexDirection: 'row', flexWrap: 'wrap', maxWidth: '94vw', maxHeight: '90vh',
         justifyContent: 'center', alignItems: 'center', gap: isMobile ? '4px' : '8px', padding: isMobile ? '6px' : '10px',
         background: 'rgba(255, 255, 255, 0.95)', backdropFilter: 'blur(10px)',

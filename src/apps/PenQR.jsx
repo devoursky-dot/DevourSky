@@ -32,6 +32,20 @@ const PenQR = () => {
   const currentPoints = useRef([]);
   const [roomId] = useState(() => Math.random().toString(36).substring(2, 8).toUpperCase()); // 랜덤 룸 ID 생성
 
+  // [추가] 앱 실행 시 전체 화면 모드 전환 시도
+  useEffect(() => {
+    const enterFullScreen = async () => {
+      try {
+        if (!document.fullscreenElement) {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch (e) {
+        console.log("전체 화면 전환 실패 (사용자 상호작용 필요):", e);
+      }
+    };
+    enterFullScreen();
+  }, []);
+
   // 1. 학생 답변 실시간 수신
   useEffect(() => {
     const q = query(collection(db, "rooms", roomId, "answers"), orderBy("timestamp", "desc"));
