@@ -24,8 +24,12 @@ const PenQR_SP = () => {
   const [roomId, setRoomId] = useState(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.hash.split('?')[1]);
-    setRoomId(params.get('room'));
+    // URL의 search(?room=...) 또는 hash(#...?room=...)에서 room ID 추출
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.split('?')[1]);
+    
+    const id = searchParams.get('room') || hashParams.get('room');
+    setRoomId(id);
   }, []);
 
   // 1. 선생님 판서 실시간 데이터 수신

@@ -125,7 +125,7 @@ const PenQR = () => {
       {showQR && (
         <div style={styles.qrPopup}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 200 }}>
-            <QRCodeCanvas value={`${window.location.origin}${window.location.pathname}#/student?room=${roomId}`} size={160} />
+            <QRCodeCanvas value={`${window.location.origin}/student?room=${roomId}`} size={160} />
             <p style={{margin: '15px 0 10px', fontSize: '16px'}}>Room ID: <strong>{roomId}</strong></p>
             <p style={{margin: '0 0 15px', color: '#666', fontSize: '14px'}}>QR코드를 스캔하여<br/>답변을 입력하세요.</p>
             <button onClick={handleCloseSession} style={styles.closeBtn}>질문 종료</button>
