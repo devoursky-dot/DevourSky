@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { getStroke } from 'perfect-freehand';
 import { QRCodeCanvas } from 'qrcode.react';
-import { Pencil, Eraser, Trash2, Share2, MessageSquare, Undo, Redo } from 'lucide-react';
+import { Pencil, Eraser, Trash2, Share2, MessageSquare, Undo, Redo, Maximize, Minimize } from 'lucide-react';
 
 import { db } from './PenQR_conf';
 import { doc, setDoc, collection, onSnapshot, query, orderBy, deleteDoc, getDocs } from 'firebase/firestore';
@@ -21,18 +21,22 @@ const getSvgPathFromStroke = (stroke) => {
 const PenQR = () => {
   const [history, setHistory] = useState([[]]); // 전체 히스토리 저장
   const [currentStep, setCurrentStep] = useState(0); // 현재 히스토리 단계
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [dpr, setDpr] = useState(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
+  const [windowSize, setWindowSize] = useState({ width: window.innerWidth, height: window.innerHeight });
   const strokes = history[currentStep]; // 현재 보여줄 스트로크
   const strokesRef = useRef([]); // 그리기 데이터의 즉각적인 참조를 위한 Ref
   const [tool, setTool] = useState('pen');
   const [showQR, setShowQR] = useState(false);
   const [responses, setResponses] = useState([]);
   const [boardImage, setBoardImage] = useState(null); // 캡처된 판서 이미지 저장
-  const canvasRef = useRef(null);
+  const staticCanvasRef = useRef(null); // 완료된 획 (배경)
+  const activeCanvasRef = useRef(null); // 현재 긋는 획 (전경)
   const isDrawing = useRef(false);
   const currentPoints = useRef([]);
   const [roomId] = useState(() => Math.random().toString(36).substring(2, 8).toUpperCase()); // 랜덤 룸 ID 생성
 
-  // [추가] 앱 실행 시 전체 화면 모드 전환 시도
+  // [추가] 앱 실행 시 전체 화면 모드 전환 시도 및 리사이즈/DPR 감지
   useEffect(() => {
     const enterFullScreen = async () => {
       try {
@@ -44,7 +48,25 @@ const PenQR = () => {
       }
     };
     enterFullScreen();
+
+    const handleResize = () => {
+      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+      setDpr(window.devicePixelRatio || 1);
+    };
+    const handleFullScreenChange = () => setIsFullScreen(!!document.fullscreenElement);
+
+    window.addEventListener('resize', handleResize);
+    document.addEventListener('fullscreenchange', handleFullScreenChange);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      document.removeEventListener('fullscreenchange', handleFullScreenChange);
+    };
   }, []);
+
+  // 화면 크기나 DPR 변경 시 다시 그리기
+  useEffect(() => {
+    redrawAll();
+  }, [windowSize, dpr]);
 
   // 1. 학생 답변 실시간 수신
   useEffect(() => {
@@ -58,20 +80,20 @@ const PenQR = () => {
   // strokes 상태가 변경되면 ref도 동기화 (Undo/Redo 등 외부 변경 대응)
   useEffect(() => {
     strokesRef.current = strokes;
-    draw();
+    redrawAll();
   }, [strokes]);
 
   // 2. 판서 데이터 Firebase 업로드 (공유 버튼 클릭 시)
   const shareBoard = async () => {
     // 현재 캔버스 내용을 이미지로 캡처
-    if (canvasRef.current) {
-      setBoardImage(canvasRef.current.toDataURL());
+    if (staticCanvasRef.current) {
+      setBoardImage(staticCanvasRef.current.toDataURL());
     }
 
     await setDoc(doc(db, "rooms", roomId), {
       strokes: JSON.stringify(strokes),
-      width: canvasRef.current ? canvasRef.current.width : window.innerWidth,
-      height: canvasRef.current ? canvasRef.current.height : window.innerHeight,
+      width: staticCanvasRef.current ? staticCanvasRef.current.width : window.innerWidth,
+      height: staticCanvasRef.current ? staticCanvasRef.current.height : window.innerHeight,
       updatedAt: new Date()
     });
     setShowQR(true);
@@ -92,30 +114,53 @@ const PenQR = () => {
     }
   };
 
-  // --- 드로잉 로직 ---
-  const draw = useCallback(() => {
-    const ctx = canvasRef.current.getContext('2d');
-    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-    // strokes 상태 대신 strokesRef를 사용하여 깜빡임 방지
-    [...strokesRef.current, { points: currentPoints.current, tool }].forEach(s => {
-      if (!s.points.length) return;
-      const outline = getStroke(s.points, { size: s.tool === 'eraser' ? 25 : 5 });
-      const path = new Path2D(getSvgPathFromStroke(outline));
-      ctx.fillStyle = s.tool === 'eraser' ? '#fff' : '#000';
-      ctx.fill(path);
+  // --- 드로잉 헬퍼 ---
+  const drawStroke = (ctx, stroke) => {
+    if (!stroke.points.length) return;
+    const outline = getStroke(stroke.points, { size: stroke.tool === 'eraser' ? 25 : 5 });
+    const path = new Path2D(getSvgPathFromStroke(outline));
+    ctx.fillStyle = stroke.tool === 'eraser' ? '#fff' : '#000';
+    ctx.fill(path);
+  };
+
+  // 전체 다시 그리기 (Undo/Redo, Resize 시에만 호출)
+  const redrawAll = useCallback(() => {
+    if (!staticCanvasRef.current) return;
+    const ctx = staticCanvasRef.current.getContext('2d');
+    
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, staticCanvasRef.current.width, staticCanvasRef.current.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    strokesRef.current.forEach(s => drawStroke(ctx, s));
+  }, [dpr]);
+
+  // 현재 긋고 있는 획만 그리기 (Active Canvas - 매우 빠름)
+  const drawCurrent = useCallback(() => {
+    if (!activeCanvasRef.current) return;
+    const ctx = activeCanvasRef.current.getContext('2d');
+    
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, activeCanvasRef.current.width, activeCanvasRef.current.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    drawStroke(ctx, {
+      points: currentPoints.current,
+      tool
     });
-  }, [tool]); // strokes 의존성 제거 (Ref 사용)
+  }, [tool, dpr]);
 
   const onPointerDown = (e) => {
     isDrawing.current = true;
+    e.target.setPointerCapture(e.pointerId); // 터치가 캔버스 밖으로 나가도 끊기지 않게 함
     currentPoints.current = [[e.clientX, e.clientY, e.pressure]];
-    requestAnimationFrame(draw);
+    requestAnimationFrame(drawCurrent);
   };
 
   const onPointerMove = (e) => {
     if (!isDrawing.current) return;
     currentPoints.current.push([e.clientX, e.clientY, e.pressure]);
-    requestAnimationFrame(draw);
+    requestAnimationFrame(drawCurrent);
   };
 
   const onPointerUp = () => {
@@ -126,14 +171,21 @@ const PenQR = () => {
       const newStroke = { points: newPoints, tool };
       const newStrokes = [...strokes, newStroke];
       strokesRef.current = newStrokes; // Ref 즉시 업데이트로 공백 제거
+
+      // Static Canvas에 확정된 획 추가 (전체 다시 그리기 아님 -> 성능 최적화)
+      const ctx = staticCanvasRef.current.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); 
+      drawStroke(ctx, newStroke);
       
       const newHistory = history.slice(0, currentStep + 1);
       newHistory.push(newStrokes);
       setHistory(newHistory);
       setCurrentStep(newHistory.length - 1);
     }
+    
+    // Active Canvas 비우기
     currentPoints.current = [];
-    draw(); // 즉시 다시 그려서 화면 유지
+    drawCurrent(); 
   };
 
   // 실행 취소 (Undo)
@@ -159,10 +211,21 @@ const PenQR = () => {
     setCurrentStep(newHistory.length - 1);
   };
 
+  const toggleFullScreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(e => console.log(e));
+    } else {
+      document.exitFullscreen().catch(e => console.log(e));
+    }
+  };
+
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', background: '#eee' }}>
-      <canvas ref={canvasRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} 
-        width={window.innerWidth} height={window.innerHeight} style={{ background: '#fff', touchAction: 'none' }} />
+      {/* 배경 캔버스 (완료된 획) */}
+      <canvas ref={staticCanvasRef} width={windowSize.width * dpr} height={windowSize.height * dpr} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: '#fff', touchAction: 'none' }} />
+      {/* 전경 캔버스 (현재 그리기용) */}
+      <canvas ref={activeCanvasRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} 
+        width={windowSize.width * dpr} height={windowSize.height * dpr} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'transparent', touchAction: 'none' }} />
       
       {/* 툴바 */}
       <div style={styles.toolbar}>
@@ -175,6 +238,9 @@ const PenQR = () => {
         <button onClick={handleUndo} disabled={currentStep === 0} style={currentStep === 0 ? styles.disabledBtn : styles.btn}><Undo /></button>
         <button onClick={handleRedo} disabled={currentStep === history.length - 1} style={currentStep === history.length - 1 ? styles.disabledBtn : styles.btn}><Redo /></button>
         
+        <div style={styles.dividerVertical} />
+        <button onClick={toggleFullScreen} style={styles.btn} title="전체화면">{isFullScreen ? <Minimize /> : <Maximize />}</button>
+
         <button onClick={shareBoard} style={styles.shareBtn}><Share2 /> 질문발행</button>
       </div>
 
@@ -220,7 +286,7 @@ const PenQR = () => {
 };
 
 const styles = {
-  toolbar: { position: 'absolute', bottom: 30, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 10, background: '#fff', padding: '10px 20px', borderRadius: 30, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', zIndex: 100 },
+  toolbar: { position: 'absolute', bottom: 50, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 10, background: '#fff', padding: '10px 20px', borderRadius: 30, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', zIndex: 100 },
   btn: { padding: 10, border: 'none', background: 'none', cursor: 'pointer', color: '#000' },
   disabledBtn: { padding: 10, border: 'none', background: 'none', cursor: 'not-allowed', color: '#ccc' },
   activeBtn: { padding: 10, border: 'none', background: '#ddd', borderRadius: 8, cursor: 'pointer' },

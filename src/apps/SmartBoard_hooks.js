@@ -1,5 +1,5 @@
 // SmartBoard_hooks.js
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 
 // 색상 팔레트 (앱 전체에서 공유)
 export const colorPalette = [
@@ -18,6 +18,8 @@ const VELOCITY_PARAMS = {
   smoothing: 0.1       
 };
 
+const SPLINE_QUALITY = 8;
+
 // --- 헬퍼 함수 ---
 const getRelativePointerPosition = (stage) => {
   const transform = stage.getAbsoluteTransform().copy().invert();
@@ -31,6 +33,14 @@ const getCenter = (p1, p2) => ({
   x: (p1.x + p2.x) / 2,
   y: (p1.y + p2.y) / 2,
 });
+
+const catmullRom = (p0, p1, p2, p3, t) => {
+  const v0 = (p2 - p0) * 0.5;
+  const v1 = (p3 - p1) * 0.5;
+  const t2 = t * t;
+  const t3 = t * t2;
+  return (2 * p1 - 2 * p2 + v0 + v1) * t3 + (-3 * p1 + 3 * p2 - 2 * v0 - v1) * t2 + v0 * t + p1;
+};
 
 // --- Ramer-Douglas-Peucker 알고리즘 (곡선 단순화) ---
 const getSqSegDist = (p, p1, p2) => {
@@ -81,12 +91,133 @@ const simplifyPoints = (points, tolerance) => {
   return result;
 };
 
+// --- 캔버스 드로잉 헬퍼 (PressureLine 로직 이식) ---
+const drawLineOnCanvas = (ctx, line) => {
+  if (!line.points || line.points.length < 2) return;
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.globalAlpha = line.opacity || 1;
+  
+  // 지우개 처리
+  if (line.color === 'white' || line.tool === 'eraser') {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.strokeStyle = 'rgba(0,0,0,1)'; // 지우개는 색상 무관, 알파만 중요
+  } else {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = line.color;
+    ctx.fillStyle = line.color;
+  }
+
+  // 1. 일반 펜 / 형광펜 / 직선 / 스마트 도형
+  if (line.penType !== 'pressure' || line.tool !== 'pen') {
+    ctx.lineWidth = line.strokeWidth;
+    ctx.beginPath();
+    ctx.moveTo(line.points[0], line.points[1]);
+    for (let i = 2; i < line.points.length; i += 2) {
+      ctx.lineTo(line.points[i], line.points[i + 1]);
+    }
+    // 스마트 도형(closed) 처리
+    if (line.tool === 'rect' || line.tool === 'ellipse') {
+      // Rect/Ellipse는 별도 객체로 처리하므로 여기서는 패스 (혹은 필요시 구현)
+      return; 
+    }
+    ctx.stroke();
+    return;
+  }
+
+  // 2. 필압 펜 (Pressure Pen) - Spline Interpolation (원래대로 복구)
+  const points = line.points;
+  const widths = line.widths || [];
+  const numPoints = points.length / 2;
+  if (numPoints < 2) return;
+
+  const getW = (idx) => {
+    if (idx < 0) return widths[0];
+    if (idx >= widths.length) return widths[widths.length - 1];
+    return widths[idx];
+  };
+
+  // 보간된 점들을 저장할 배열
+  const interpolatedPoints = [];
+  const interpolatedWidths = [];
+
+  for (let i = 0; i < numPoints - 1; i++) {
+    const p0x = i === 0 ? points[0] : points[(i - 1) * 2];
+    const p0y = i === 0 ? points[1] : points[(i - 1) * 2 + 1];
+    const p1x = points[i * 2];
+    const p1y = points[i * 2 + 1];
+    const p2x = points[(i + 1) * 2];
+    const p2y = points[(i + 1) * 2 + 1];
+    const p3x = i === numPoints - 2 ? p2x : points[(i + 2) * 2];
+    const p3y = i === numPoints - 2 ? p2y : points[(i + 2) * 2 + 1];
+
+    const w0 = getW(i - 1);
+    const w1 = getW(i);
+    const w2 = getW(i + 1);
+    const w3 = getW(i + 2);
+
+    for (let j = 0; j < SPLINE_QUALITY; j++) {
+      const t = j / SPLINE_QUALITY;
+      const x = catmullRom(p0x, p1x, p2x, p3x, t);
+      const y = catmullRom(p0y, p1y, p2y, p3y, t);
+      const w = catmullRom(w0, w1, w2, w3, t);
+      interpolatedPoints.push({ x, y });
+      interpolatedWidths.push(Math.max(0.1, w));
+    }
+  }
+  // 마지막 점 추가
+  interpolatedPoints.push({ x: points[points.length - 2], y: points[points.length - 1] });
+  interpolatedWidths.push(getW(widths.length - 1));
+
+  // 외곽선 그리기
+  ctx.beginPath();
+  const leftPath = [];
+  const rightPath = [];
+
+  for (let i = 0; i < interpolatedPoints.length; i++) {
+    const p = interpolatedPoints[i];
+    const w = interpolatedWidths[i];
+    // 다음 점과의 각도 계산 (마지막 점은 이전 점 사용)
+    const nextP = interpolatedPoints[i + 1] || interpolatedPoints[i];
+    const prevP = interpolatedPoints[i - 1] || interpolatedPoints[i];
+    const angle = Math.atan2(nextP.y - prevP.y, nextP.x - prevP.x);
+    
+    const sin = Math.sin(angle);
+    const cos = Math.cos(angle);
+    
+    leftPath.push({ x: p.x + sin * w / 2, y: p.y - cos * w / 2 });
+    rightPath.push({ x: p.x - sin * w / 2, y: p.y + cos * w / 2 });
+  }
+
+  // 경로 연결
+  if (leftPath.length > 0) {
+    ctx.moveTo(leftPath[0].x, leftPath[0].y);
+    for (let i = 1; i < leftPath.length; i++) ctx.lineTo(leftPath[i].x, leftPath[i].y);
+    for (let i = rightPath.length - 1; i >= 0; i--) ctx.lineTo(rightPath[i].x, rightPath[i].y);
+    ctx.closePath();
+    ctx.fill();
+  }
+  
+  if (line.color === 'white' || line.tool === 'eraser') {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = 'rgba(0,0,0,1)';
+  } else {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = line.color;
+  }
+};
+
 // --- 메인 커스텀 훅 ---
 export const useSmartBoard = () => {
   // 상태(State) 관리
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfImage, setPdfImage] = useState(null);
   const [lines, setLines] = useState([]);
+  const [rasterCanvas, setRasterCanvas] = useState(null); // [추가] 완료된 선들을 구운 캔버스 (Bitmap)
+  const [activeCanvas, setActiveCanvas] = useState(null); // [추가] 현재 그리는 선을 위한 임시 캔버스
+  const activeLayerRef = useRef(null); // [추가] 활성 레이어 참조
+  const currentLineRef = useRef(null); // [변경] 현재 선을 Ref로 관리 (렌더링 방지)
   const [history, setHistory] = useState([[]]); 
   const [historyStep, setHistoryStep] = useState(0); 
   const [tool, setTool] = useState('pen');
@@ -116,9 +247,43 @@ export const useSmartBoard = () => {
 
   const activePen = pens[activePenId];
 
+  // [추가] 래스터 캔버스 초기화
+  useEffect(() => {
+    const canvas = document.createElement('canvas');
+    // 캔버스 크기는 충분히 크게 잡거나 PDF 크기에 맞춤 (여기서는 FHD 기준 2배수로 설정하여 고해상도 대응)
+    canvas.width = 3840; 
+    canvas.height = 2160;
+    setRasterCanvas(canvas);
+  }, []);
+
+  // [추가] 활성 캔버스 초기화
+  useEffect(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 3840;
+    canvas.height = 2160;
+    setActiveCanvas(canvas);
+  }, []);
+
+  // [추가] 히스토리 변경 시 캔버스 다시 그리기 (Undo/Redo)
   useEffect(() => {
     linesRef.current = lines;
-  }, [lines]);
+    if (rasterCanvas) {
+      const ctx = rasterCanvas.getContext('2d');
+      ctx.clearRect(0, 0, rasterCanvas.width, rasterCanvas.height);
+      
+      lines.forEach(line => {
+        // 마스크(Rect)나 도형 등은 캔버스에 그리지 않고 벡터로 남길 수 있음
+        // 여기서는 펜 스트로크만 캔버스에 굽습니다.
+        if (line.tool !== 'rect' && line.tool !== 'ellipse' && line.tool !== 'smart_path') {
+          drawLineOnCanvas(ctx, line);
+        }
+      });
+      
+      // Konva Image 갱신을 위해 캔버스 참조 업데이트 (꼼수: 상태를 살짝 건드려 리렌더링 유도할 수도 있음)
+      // 하지만 React-Konva의 Image 컴포넌트는 canvas 객체가 같으면 리렌더링 안할 수 있음.
+      // 상위 컴포넌트에서 layer.batchDraw()가 필요할 수 있음.
+    }
+  }, [lines, rasterCanvas]);
 
   useEffect(() => {
     const handleFullScreenChange = () => setIsFullScreen(!!document.fullscreenElement);
@@ -191,6 +356,10 @@ export const useSmartBoard = () => {
     setHistoryStep(0);
     setStageScale(1);
     setStagePos({ x: 0, y: 0 });
+    if (rasterCanvas) {
+      const ctx = rasterCanvas.getContext('2d');
+      ctx.clearRect(0, 0, rasterCanvas.width, rasterCanvas.height);
+    }
   }, [currPage]);
 
   const handlePrevPage = useCallback(() => {
@@ -259,8 +428,14 @@ export const useSmartBoard = () => {
       widths: (tool === 'pen' && activePen.type === 'pressure') ? [activePen.width] : undefined
     };
 
-    setLines(prev => [...prev, newLine]);
-  }, [tool, activePen]);
+    currentLineRef.current = newLine; // [변경] State 대신 Ref 업데이트
+
+    // 활성 캔버스 초기화
+    if (activeCanvas) {
+      const ctx = activeCanvas.getContext('2d');
+      ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+    }
+  }, [tool, activePen, activeCanvas]);
 
   const handleMouseMove = useCallback((e) => {
     if (tool === 'hand') return;
@@ -304,32 +479,42 @@ export const useSmartBoard = () => {
 
       lastPressureRef.current = { time: now, x: point.x, y: point.y, velocity, width };
 
-      setLines(prev => {
-        const lastLine = { ...prev[prev.length - 1] };
-        lastLine.points = lastLine.points.concat([point.x, point.y]);
-        if (!lastLine.widths) lastLine.widths = [baseWidth];
-        lastLine.widths = lastLine.widths.concat([width]);
-        
-        return [...prev.slice(0, -1), lastLine];
-      });
+      if (currentLineRef.current) {
+        const line = currentLineRef.current;
+        line.points.push(point.x, point.y);
+        if (!line.widths) line.widths = [baseWidth];
+        line.widths.push(width);
+
+        if (activeCanvas) {
+          const ctx = activeCanvas.getContext('2d');
+          ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+          drawLineOnCanvas(ctx, line);
+          if (activeLayerRef.current) activeLayerRef.current.batchDraw();
+        }
+      }
       return;
     }
 
     if (tool === 'pen' && activePen.type === 'smart' && isDrawing.current) {
       if (isSmartShapeFixed.current) return; 
 
-      setLines(prev => {
-        const lastLine = { ...prev[prev.length - 1] };
-        lastLine.points = lastLine.points.concat([point.x, point.y]);
-        return [...prev.slice(0, -1), lastLine];
-      });
+      if (currentLineRef.current) {
+        const line = currentLineRef.current;
+        line.points.push(point.x, point.y);
+        
+        if (activeCanvas) {
+          const ctx = activeCanvas.getContext('2d');
+          ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+          drawLineOnCanvas(ctx, line);
+          if (activeLayerRef.current) activeLayerRef.current.batchDraw();
+        }
+      }
 
       if (smartTimer.current) clearTimeout(smartTimer.current);
       smartTimer.current = setTimeout(() => {
-        setLines(prev => {
-          const lastIndex = prev.length - 1;
-          const lastLine = prev[lastIndex];
-          if (!lastLine || lastLine.penType !== 'smart' || lastLine.points.length < 4) return prev;
+        if (!currentLineRef.current || currentLineRef.current.penType !== 'smart' || currentLineRef.current.points.length < 4) return;
+        
+        const lastLine = currentLineRef.current;
 
           const pts = lastLine.points;
           const start = { x: pts[0], y: pts[1] };
@@ -348,21 +533,33 @@ export const useSmartBoard = () => {
           }
 
           const newLine = { ...lastLine, tool: newTool, tension: newTool === 'smart_curve' ? 0.5 : 0, points: newTool === 'line_straight' ? [start.x, start.y, end.x, end.y] : newPoints };
-          return [...prev.slice(0, -1), newLine];
-        });
+          
+          currentLineRef.current = newLine;
+          
+          if (activeCanvas) {
+            const ctx = activeCanvas.getContext('2d');
+            ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+            drawLineOnCanvas(ctx, newLine);
+            if (activeLayerRef.current) activeLayerRef.current.batchDraw();
+          }
+
         isSmartShapeFixed.current = true; 
       }, 600);
       return;
     }
 
     if (isDrawing.current) {
-      setLines(prev => {
-        const lastLine = { ...prev[prev.length - 1] };
-        lastLine.points = lastLine.points.concat([point.x, point.y]);
-        return [...prev.slice(0, -1), lastLine];
-      });
+      if (currentLineRef.current) {
+        currentLineRef.current.points.push(point.x, point.y);
+        if (activeCanvas) {
+          const ctx = activeCanvas.getContext('2d');
+          ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+          drawLineOnCanvas(ctx, currentLineRef.current);
+          if (activeLayerRef.current) activeLayerRef.current.batchDraw();
+        }
+      }
     }
-  }, [tool, currentCrop, activePen]);
+  }, [tool, currentCrop, activePen, activeCanvas]);
 
   const handleMouseUp = useCallback(() => { 
     if (tool === 'crop' && currentCrop) {
@@ -388,15 +585,36 @@ export const useSmartBoard = () => {
       if (smartTimer.current) clearTimeout(smartTimer.current);
       isDrawing.current = false;
       isSmartShapeFixed.current = false;
-      addToHistory(linesRef.current);
+      
+      if (currentLineRef.current) {
+        const newLines = [...lines, currentLineRef.current];
+        setLines(newLines);
+        addToHistory(newLines);
+        currentLineRef.current = null;
+        if (activeCanvas) {
+          const ctx = activeCanvas.getContext('2d');
+          ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+          if (activeLayerRef.current) activeLayerRef.current.batchDraw();
+        }
+      }
       return;
     }
 
     if (isDrawing.current) {
       isDrawing.current = false;
-      addToHistory(linesRef.current);
+      if (currentLineRef.current) {
+        const newLines = [...lines, currentLineRef.current];
+        setLines(newLines);
+        addToHistory(newLines);
+        currentLineRef.current = null;
+        if (activeCanvas) {
+          const ctx = activeCanvas.getContext('2d');
+          ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+          if (activeLayerRef.current) activeLayerRef.current.batchDraw();
+        }
+      }
     }
-  }, [tool, currentCrop, bgColor, addToHistory, activePen]);
+  }, [tool, currentCrop, bgColor, addToHistory, activePen, lines, activeCanvas]);
 
   const handleWheel = useCallback((e) => {
     e.evt.preventDefault();
@@ -522,7 +740,7 @@ export const useSmartBoard = () => {
   }, [addToHistory]);
 
   return {
-    pdfFile, pdfImage, lines, tool, setTool, pens, activePenId, setActivePenId,
+    pdfFile, pdfImage, lines, rasterCanvas, activeCanvas, activeLayerRef, tool, setTool, pens, activePenId, setActivePenId,
     stageScale, stagePos, setStagePos, bgColor, currentCrop, isFullScreen,
     numPages, currPage, showPageSelector, setShowPageSelector, stageRef, activePen,
     updateActivePen, toggleFullScreen, handleFileChange, onDocumentLoadSuccess,
