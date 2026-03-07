@@ -18,7 +18,8 @@ const VELOCITY_PARAMS = {
   smoothing: 0.1       
 };
 
-const SPLINE_QUALITY = 8;
+// [OPTIMIZATION] Reduced from 8 to 4 to halve JavaScript interpolation workload
+const SPLINE_QUALITY = 4;
 
 // --- 헬퍼 함수 ---
 const getRelativePointerPosition = (stage) => {
@@ -210,14 +211,18 @@ const drawLineOnCanvas = (ctx, line) => {
 
 // --- 메인 커스텀 훅 ---
 export const useSmartBoard = () => {
-  // 상태(State) 관리
+  // 1. All useState Hooks
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfImage, setPdfImage] = useState(null);
   const [lines, setLines] = useState([]);
-  const [rasterCanvas, setRasterCanvas] = useState(null); // [추가] 완료된 선들을 구운 캔버스 (Bitmap)
-  const [activeCanvas, setActiveCanvas] = useState(null); // [추가] 현재 그리는 선을 위한 임시 캔버스
-  const activeLayerRef = useRef(null); // [추가] 활성 레이어 참조
-  const currentLineRef = useRef(null); // [변경] 현재 선을 Ref로 관리 (렌더링 방지)
+  const [rasterCanvas, setRasterCanvas] = useState(null); 
+  const [activeCanvas, setActiveCanvas] = useState(null); 
+
+  // 2. Interleaved Refs (Match previous order)
+  const activeLayerRef = useRef(null); 
+  const currentLineRef = useRef(null);
+
+  // 3. More states
   const [history, setHistory] = useState([[]]); 
   const [historyStep, setHistoryStep] = useState(0); 
   const [tool, setTool] = useState('pen');
@@ -234,8 +239,10 @@ export const useSmartBoard = () => {
   const [numPages, setNumPages] = useState(null);
   const [currPage, setCurrPage] = useState(1);
   const [showPageSelector, setShowPageSelector] = useState(false);
+  const [isDrawingNow, setIsDrawingNow] = useState(false); 
+  const [pdfLoading, setPdfLoading] = useState(false);
 
-  // 참조(Ref) 관리
+  // 4. More Refs
   const stageRef = useRef(null);
   const isDrawing = useRef(false);
   const lastDist = useRef(0);
@@ -244,6 +251,7 @@ export const useSmartBoard = () => {
   const smartTimer = useRef(null); 
   const isSmartShapeFixed = useRef(false); 
   const lastPressureRef = useRef({ time: 0, x: 0, y: 0, velocity: 0, width: 0 });
+  const pageCanvasRef = useRef(null); // [추가] 내부 렌더링용 캔버스 참조
 
   const activePen = pens[activePenId];
 
@@ -268,7 +276,8 @@ export const useSmartBoard = () => {
   useEffect(() => {
     linesRef.current = lines;
     if (rasterCanvas) {
-      const ctx = rasterCanvas.getContext('2d');
+      // [OPTIMIZATION] desynchronized hint
+      const ctx = rasterCanvas.getContext('2d', { desynchronized: true });
       ctx.clearRect(0, 0, rasterCanvas.width, rasterCanvas.height);
       
       lines.forEach(line => {
@@ -328,10 +337,16 @@ export const useSmartBoard = () => {
 
   // [추가] 외부(구글 드라이브 등)에서 가져온 Blob 데이터를 로드하는 함수
   const loadPdf = useCallback((fileOrBlob) => {
+    setPdfLoading(true);
+    // [OPTIMIZATION] 기존 캔버스 메모리 강제 해제 시도
+    if (pdfImage instanceof HTMLCanvasElement) {
+      pdfImage.width = 0;
+      pdfImage.height = 0;
+    }
     setPdfImage(null);
     setPdfFile(fileOrBlob);
     setCurrPage(1);
-  }, []);
+  }, [pdfImage]);
 
   const handleFileChange = useCallback((e) => {
     const file = e.target.files[0];
@@ -347,6 +362,12 @@ export const useSmartBoard = () => {
 
   const changePage = useCallback((pageNumber) => {
     if (pageNumber !== currPage) {
+      setPdfLoading(true);
+      // [OPTIMIZATION] 기존 캔버스 메모리 강제 해제 시도 (고해상도 비트맵 대응)
+      if (pdfImage instanceof HTMLCanvasElement) {
+        pdfImage.width = 0;
+        pdfImage.height = 0;
+      }
       setPdfImage(null);
     }
     setCurrPage(pageNumber);
@@ -357,10 +378,10 @@ export const useSmartBoard = () => {
     setStageScale(1);
     setStagePos({ x: 0, y: 0 });
     if (rasterCanvas) {
-      const ctx = rasterCanvas.getContext('2d');
+      const ctx = rasterCanvas.getContext('2d', { desynchronized: true });
       ctx.clearRect(0, 0, rasterCanvas.width, rasterCanvas.height);
     }
-  }, [currPage]);
+  }, [currPage, pdfImage, rasterCanvas]);
 
   const handlePrevPage = useCallback(() => {
     if (currPage > 1) changePage(currPage - 1);
@@ -370,25 +391,37 @@ export const useSmartBoard = () => {
     if (numPages && currPage < numPages) changePage(currPage + 1);
   }, [currPage, numPages, changePage]);
 
-  const onRenderSuccess = useCallback(async (page) => {
-    const renderScale = 3.0; 
-    const viewport = page.getViewport({ scale: renderScale });
-    
-    const canvas = document.createElement('canvas');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext('2d', { alpha: false });
-    
-    // 배경을 흰색으로 채움 (투명 배경 PDF가 검게 나오는 문제 방지)
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    await page.render({ canvasContext: ctx, viewport, intent: 'display' }).promise;
-    
-    setBgColor('#ffffff'); // 항상 깨끗한 흰색 배경으로 고정
+  // [추가] React-PDF가 내부적으로 렌더링한 캔버스를 캡처하는 함수 (매우 안정적)
+  const onPageRender = useCallback(() => {
+    try {
+      // canvasRef를 통해 전달받은 엘리먼트를 직접 사용합니다.
+      const canvas = pageCanvasRef.current;
+      
+      if (canvas instanceof HTMLCanvasElement && canvas.width > 0) {
+        // [OPTIMIZATION] Konva 성능과 메모리 분리를 위해 캔버스를 복제하여 사용
+        const newCanvas = document.createElement('canvas');
+        newCanvas.width = canvas.width;
+        newCanvas.height = canvas.height;
+        const ctx = newCanvas.getContext('2d');
+        ctx.drawImage(canvas, 0, 0);
+        
+        setPdfImage(newCanvas);
+        console.log("PDF Canvas captured successfully via Ref:", newCanvas.width, "x", newCanvas.height);
+      } else {
+        console.warn("PDF Canvas capture failed: canvas not found or invalid.");
+      }
+    } catch (err) {
+      console.error("Failed to capture PDF canvas:", err);
+    } finally {
+      setPdfLoading(false);
+    }
+  }, []);
 
-    // Canvas 객체를 직접 이미지 소스로 사용 (변환 과정 생략으로 안정성 확보)
-    setPdfImage(canvas);
+  const onRenderSuccess = useCallback(() => {
+    // [INFO] 실제 캔버스 캡처는 onPageRender에서 수행하거나, 
+    // 여기서 DOM을 뒤져서 가져올 수도 있습니다.
+    // 여기서는 로딩 상태 해제 보완용으로 사용합니다.
+    setPdfLoading(false);
   }, []);
 
   const handleMouseDown = useCallback((e) => {
@@ -430,9 +463,15 @@ export const useSmartBoard = () => {
 
     currentLineRef.current = newLine; // [변경] State 대신 Ref 업데이트
 
+    // [OPTIMIZATION] 선을 긋기 시작함을 UI에 알림 (렌더링은 이 때와 마우스 뗐을 때 두 번만 발생)
+    if (tool === 'pen' || tool === 'eraser') {
+      setIsDrawingNow(true);
+    }
+
     // 활성 캔버스 초기화
     if (activeCanvas) {
-      const ctx = activeCanvas.getContext('2d');
+      // [OPTIMIZATION] desynchronized hint
+      const ctx = activeCanvas.getContext('2d', { desynchronized: true });
       ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
     }
   }, [tool, activePen, activeCanvas]);
@@ -486,8 +525,24 @@ export const useSmartBoard = () => {
         line.widths.push(width);
 
         if (activeCanvas) {
-          const ctx = activeCanvas.getContext('2d');
-          ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+          const ctx = activeCanvas.getContext('2d', { desynchronized: true });
+          
+          // [OPTIMIZATION] Bounded clearRect to avoid full 4K clear on every point
+          if (line.points.length >= 4) {
+            let minX = line.points[0], maxX = minX;
+            let minY = line.points[1], maxY = minY;
+            for(let i=2; i<line.points.length; i+=2) {
+              if (line.points[i] < minX) minX = line.points[i];
+              if (line.points[i] > maxX) maxX = line.points[i];
+              if (line.points[i+1] < minY) minY = line.points[i+1];
+              if (line.points[i+1] > maxY) maxY = line.points[i+1];
+            }
+            const pad = 50; // Add generous padding to ensure we fully clear thick lines and splines
+            ctx.clearRect(Math.max(0, minX - pad), Math.max(0, minY - pad), (maxX - minX) + pad*2, (maxY - minY) + pad*2);
+          } else {
+             ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+          }
+
           drawLineOnCanvas(ctx, line);
           if (activeLayerRef.current) activeLayerRef.current.batchDraw();
         }
@@ -503,8 +558,23 @@ export const useSmartBoard = () => {
         line.points.push(point.x, point.y);
         
         if (activeCanvas) {
-          const ctx = activeCanvas.getContext('2d');
-          ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+          const ctx = activeCanvas.getContext('2d', { desynchronized: true });
+          // [OPTIMIZATION] Bounded clearRect
+          if (line.points.length >= 4) {
+            let minX = line.points[0], maxX = minX;
+            let minY = line.points[1], maxY = minY;
+            for(let i=2; i<line.points.length; i+=2) {
+              if (line.points[i] < minX) minX = line.points[i];
+              if (line.points[i] > maxX) maxX = line.points[i];
+              if (line.points[i+1] < minY) minY = line.points[i+1];
+              if (line.points[i+1] > maxY) maxY = line.points[i+1];
+            }
+            const pad = 50; 
+            ctx.clearRect(Math.max(0, minX - pad), Math.max(0, minY - pad), (maxX - minX) + pad*2, (maxY - minY) + pad*2);
+          } else {
+            ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+          }
+
           drawLineOnCanvas(ctx, line);
           if (activeLayerRef.current) activeLayerRef.current.batchDraw();
         }
@@ -537,7 +607,7 @@ export const useSmartBoard = () => {
           currentLineRef.current = newLine;
           
           if (activeCanvas) {
-            const ctx = activeCanvas.getContext('2d');
+            const ctx = activeCanvas.getContext('2d', { desynchronized: true });
             ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
             drawLineOnCanvas(ctx, newLine);
             if (activeLayerRef.current) activeLayerRef.current.batchDraw();
@@ -550,11 +620,27 @@ export const useSmartBoard = () => {
 
     if (isDrawing.current) {
       if (currentLineRef.current) {
-        currentLineRef.current.points.push(point.x, point.y);
+        const line = currentLineRef.current;
+        line.points.push(point.x, point.y);
         if (activeCanvas) {
-          const ctx = activeCanvas.getContext('2d');
-          ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
-          drawLineOnCanvas(ctx, currentLineRef.current);
+          const ctx = activeCanvas.getContext('2d', { desynchronized: true });
+          
+          if (line.points.length >= 4) {
+             let minX = line.points[0], maxX = minX;
+             let minY = line.points[1], maxY = minY;
+             for(let i=2; i<line.points.length; i+=2) {
+               if (line.points[i] < minX) minX = line.points[i];
+               if (line.points[i] > maxX) maxX = line.points[i];
+               if (line.points[i+1] < minY) minY = line.points[i+1];
+               if (line.points[i+1] > maxY) maxY = line.points[i+1];
+             }
+             const pad = 50;
+             ctx.clearRect(Math.max(0, minX - pad), Math.max(0, minY - pad), (maxX - minX) + pad*2, (maxY - minY) + pad*2);
+          } else {
+             ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+          }
+
+          drawLineOnCanvas(ctx, line);
           if (activeLayerRef.current) activeLayerRef.current.batchDraw();
         }
       }
@@ -567,10 +653,10 @@ export const useSmartBoard = () => {
       if (width > 5 && height > 5) {
         const huge = 100000;
         const maskRects = [
-          { tool: 'rect', x: -huge, y: -huge, width: huge * 2, height: huge + y, fill: bgColor },
-          { tool: 'rect', x: -huge, y: y + height, width: huge * 2, height: huge, fill: bgColor },
-          { tool: 'rect', x: -huge, y: y, width: huge + x, height: height, fill: bgColor },
-          { tool: 'rect', x: x + width, y: y, width: huge, height: height, fill: bgColor }
+          { tool: 'rect', x: -huge, y: -huge, width: huge * 2, height: huge + y, fill: bgColor, isMask: true },
+          { tool: 'rect', x: -huge, y: y + height, width: huge * 2, height: huge, fill: bgColor, isMask: true },
+          { tool: 'rect', x: -huge, y: y, width: huge + x, height: height, fill: bgColor, isMask: true },
+          { tool: 'rect', x: x + width, y: y, width: huge, height: height, fill: bgColor, isMask: true }
         ];
         const newLines = [...linesRef.current, ...maskRects];
         setLines(newLines);
@@ -592,11 +678,12 @@ export const useSmartBoard = () => {
         addToHistory(newLines);
         currentLineRef.current = null;
         if (activeCanvas) {
-          const ctx = activeCanvas.getContext('2d');
+          const ctx = activeCanvas.getContext('2d', { desynchronized: true });
           ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
           if (activeLayerRef.current) activeLayerRef.current.batchDraw();
         }
       }
+      setIsDrawingNow(false); // [추가] UI 투명화 해제
       return;
     }
 
@@ -608,12 +695,13 @@ export const useSmartBoard = () => {
         addToHistory(newLines);
         currentLineRef.current = null;
         if (activeCanvas) {
-          const ctx = activeCanvas.getContext('2d');
+          const ctx = activeCanvas.getContext('2d', { desynchronized: true });
           ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
           if (activeLayerRef.current) activeLayerRef.current.batchDraw();
         }
       }
     }
+    setIsDrawingNow(false); // [추가] UI 투명화 해제
   }, [tool, currentCrop, bgColor, addToHistory, activePen, lines, activeCanvas]);
 
   const handleWheel = useCallback((e) => {
@@ -742,13 +830,15 @@ export const useSmartBoard = () => {
   return {
     pdfFile, pdfImage, lines, rasterCanvas, activeCanvas, activeLayerRef, tool, setTool, pens, activePenId, setActivePenId,
     stageScale, stagePos, setStagePos, bgColor, currentCrop, isFullScreen,
-    numPages, currPage, showPageSelector, setShowPageSelector, stageRef, activePen,
+    numPages, currPage, showPageSelector, setShowPageSelector, stageRef, pageCanvasRef, activePen,
     updateActivePen, toggleFullScreen, handleFileChange, onDocumentLoadSuccess,
-    changePage, handlePrevPage, handleNextPage, onRenderSuccess,
+    changePage, handlePrevPage, handleNextPage, onRenderSuccess, onPageRender,
     handleMouseDown, handleMouseMove, handleMouseUp,
     handleTouchStart, handleTouchMove, handleTouchEnd,
     handleWheel, handleZoomChange, handleResetZoom, hasMask, handleCropTool, 
-    handleClearAll, loadPdf, // loadPdf 내보내기 추가
-    undo, redo, canUndo: historyStep > 0, canRedo: historyStep < history.length - 1
+    handleClearAll, loadPdf,
+    undo, redo, canUndo: historyStep > 0, canRedo: historyStep < history.length - 1,
+    isDrawingNow,
+    pdfLoading
   };
 };

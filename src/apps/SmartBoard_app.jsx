@@ -114,7 +114,7 @@ const FloatingToolbar = React.memo(({
   currPage, numPages, onPrevPage, onNextPage, onClearAll, 
   onUndo, onRedo, canUndo, canRedo,
   showPenSettings, setShowPenSettings, showZoomSlider, setShowZoomSlider,
-  isMobile, loadPdf // loadPdf 함수 props로 받기
+  isMobile, loadPdf, isDrawingNow // [수정] isDrawingNow 추가
 }) => {
   const [penSettingsPos, setPenSettingsPos] = useState({ top: 0, left: 0 });
   const [loadMenuPos, setLoadMenuPos] = useState({ top: 0, left: 0 });
@@ -234,6 +234,9 @@ const FloatingToolbar = React.memo(({
         background: 'rgba(255, 255, 255, 0.95)', backdropFilter: 'blur(10px)',
         borderRadius: '16px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)', zIndex: 1000,
         transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
+        // [OPTIMIZATION] 드로잉 중 UI 투명화 및 이벤트 차단
+        opacity: isDrawingNow ? 0.1 : 1,
+        pointerEvents: isDrawingNow ? 'none' : 'auto'
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'row', gap: isMobile ? '4px' : '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -426,10 +429,17 @@ const SmartBoardApp = () => {
 
   const boardContent = useMemo(() => (
     <>
-      <div style={{ display: 'none' }}>
+      <div style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0, pointerEvents: 'none' }}>
         {board.pdfFile && (
           <Document file={board.pdfFile} onLoadSuccess={board.onDocumentLoadSuccess} onLoadError={(error) => console.error("PDF Load Error:", error)}>
-            <Page pageNumber={board.currPage} onRenderSuccess={board.onRenderSuccess} width={dimensions.width} renderTextLayer={false} renderAnnotationLayer={false} />
+            <Page 
+              pageNumber={board.currPage} 
+              onRenderSuccess={board.onPageRender} 
+              canvasRef={board.pageCanvasRef}
+              scale={3.0} 
+              renderTextLayer={false} 
+              renderAnnotationLayer={false} 
+            />
           </Document>
         )}
       </div>
@@ -446,6 +456,8 @@ const SmartBoardApp = () => {
           onDragEnd={(e) => board.setStagePos({ x: e.target.x(), y: e.target.y() })}
           ref={board.stageRef}
         >
+          {/* [변경] 레이어 구성: 배경 -> 마스크 -> 획(래스터+액티브) -> 벡터 객체 */}
+          
           <Layer>
             <Rect width={dimensions.width * 20} height={dimensions.height * 20} x={-dimensions.width * 10} y={-dimensions.height * 10} fill={board.bgColor} />
             {board.pdfImage && (
@@ -453,14 +465,19 @@ const SmartBoardApp = () => {
             )}
           </Layer>
 
-          {/* [변경] 래스터화된 획 레이어 (성능 최적화 핵심) */}
+          {/* [추가] 마스킹 레이어 (PDF만 가리기 위해 획 레이어보다 아래에 배치) */}
+          <Layer>
+            {board.lines.map((line, i) => line.tool === 'rect' && line.isMask ? (
+              <Rect key={i} x={line.x} y={line.y} width={line.width} height={line.height} fill={line.fill} />
+            ) : null)}
+          </Layer>
+
           <Layer>
             {board.rasterCanvas && (
               <Image image={board.rasterCanvas} x={0} y={0} width={board.rasterCanvas.width} height={board.rasterCanvas.height} listening={false} />
             )}
           </Layer>
 
-          {/* [추가] 현재 그리는 중인 선 (Active Canvas) - 즉각적인 반응 속도 보장 */}
           <Layer ref={board.activeLayerRef}>
             {board.activeCanvas && (
               <Image image={board.activeCanvas} x={0} y={0} width={board.activeCanvas.width} height={board.activeCanvas.height} listening={false} />
@@ -468,14 +485,10 @@ const SmartBoardApp = () => {
           </Layer>
 
           <Layer>
-            {board.lines.map((line, i) => line.tool === 'rect' ? (
+            {/* [변경] 일반 벡터 도형 및 크롭 미리보기 */}
+            {board.lines.map((line, i) => (line.tool === 'rect' && !line.isMask) ? (
               <Rect key={i} x={line.x} y={line.y} width={line.width} height={line.height} fill={line.fill} />
-            ) : null)}
-          </Layer>
-
-          <Layer>
-            {/* [변경] 완료된 획은 래스터 캔버스에 그려지므로, 여기서는 '현재 그리는 중인 선'과 '벡터 객체(도형)'만 렌더링 */}
-            {board.lines.map((line, i) => line.tool === 'ellipse' ? (
+            ) : line.tool === 'ellipse' ? (
               <React.Fragment key={i}>
                 <Ellipse x={line.x + line.width/2} y={line.y + line.height/2} radiusX={Math.abs(line.width)/2} radiusY={Math.abs(line.height)/2} stroke={line.color} strokeWidth={line.strokeWidth} fillEnabled={false} />
               </React.Fragment>
@@ -504,7 +517,7 @@ const SmartBoardApp = () => {
   ), [
     board.pdfFile, board.pdfImage, board.lines, board.tool, board.stageScale, board.stagePos, board.bgColor, 
     board.currentCrop, board.onRenderSuccess, board.handleMouseDown, board.handleMouseMove, board.handleMouseUp, 
-    board.handleTouchStart, board.handleTouchMove, board.handleTouchEnd, board.handleWheel, board.currPage, board.onDocumentLoadSuccess, dimensions,
+    board.handleTouchStart, board.handleTouchMove, board.handleTouchEnd, board.handleWheel, board.currPage, board.onDocumentLoadSuccess, dimensions, board.isDrawingNow // [수정] 의존성 배열에 추가
   ]);
 
   return (
@@ -523,7 +536,8 @@ const SmartBoardApp = () => {
         showPenSettings={showPenSettings} setShowPenSettings={setShowPenSettings}
         showZoomSlider={showZoomSlider} setShowZoomSlider={setShowZoomSlider}
         isMobile={isMobile}
-        loadPdf={board.loadPdf} // [추가] 훅에서 받아온 함수 전달
+        loadPdf={board.loadPdf} 
+        isDrawingNow={board.isDrawingNow} // [추가] UI 격리 상태 전달
       />
 
       {board.showPageSelector && board.pdfFile && (
@@ -532,17 +546,44 @@ const SmartBoardApp = () => {
             <h3 style={{ margin: '0 0 20px 0', color: '#333' }}>페이지 선택</h3>
             <Document file={board.pdfFile}>
               <div style={gridStyle}>
-                {Array.from(new Array(board.numPages), (el, index) => (
-                  <div key={`page_${index + 1}`} onClick={() => board.changePage(index + 1)} 
-                    style={{ ...thumbnailStyle, border: board.currPage === index + 1 ? '2px solid #6366f1' : '1px solid #eee', backgroundColor: board.currPage === index + 1 ? '#eef2ff' : 'white' }}>
-                    <div style={{ pointerEvents: 'none' }}>
-                      <Page pageNumber={index + 1} width={75} renderTextLayer={false} renderAnnotationLayer={false} />
+                {Array.from(new Array(board.numPages), (el, index) => {
+                  const pageNum = index + 1;
+                  // [OPTIMIZATION] Lazy Loading: 현재 페이지 기준 +- 5페이지만 로드하여 메모리 절약
+                  const isNear = Math.abs(pageNum - board.currPage) <= 5;
+                  
+                  return (
+                    <div key={`page_${pageNum}`} onClick={() => board.changePage(pageNum)} 
+                      style={{ ...thumbnailStyle, border: board.currPage === pageNum ? '2px solid #6366f1' : '1px solid #eee', backgroundColor: board.currPage === pageNum ? '#eef2ff' : 'white' }}>
+                      <div style={{ pointerEvents: 'none', width: 75, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#f9fafb' }}>
+                        {isNear ? (
+                          <Page pageNumber={pageNum} width={75} renderTextLayer={false} renderAnnotationLayer={false} />
+                        ) : (
+                          <div style={{ fontSize: '10px', color: '#999' }}>지연 로딩 중...</div>
+                        )}
+                      </div>
+                      <span style={{ marginTop: '8px', fontSize: '14px', fontWeight: '500', color: '#555' }}>{pageNum}</span>
                     </div>
-                    <span style={{ marginTop: '8px', fontSize: '14px', fontWeight: '500', color: '#555' }}>{index + 1}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </Document>
+          </div>
+        </div>
+      )}
+
+      {/* [추가] PDF 로딩/렌더링 중 표시되는 오버레이 */}
+      {board.pdfLoading && (
+        <div style={{ ...modalOverlayStyle, backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 3000 }}>
+          <div style={{ padding: '20px 40px', background: 'white', borderRadius: '12px', textAlign: 'center', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <div style={{ marginBottom: '15px' }}>
+              {/* 단순 CSS 애니메이션 (회전) */}
+              <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto' }} />
+              <style>{`
+                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+              `}</style>
+            </div>
+            <p style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#333' }}>페이지를 렌더링 중입니다...</p>
+            <p style={{ margin: '5px 0 0', fontSize: '14px', color: '#666' }}>잠시만 기다려주세요.</p>
           </div>
         </div>
       )}
